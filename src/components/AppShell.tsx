@@ -17,6 +17,7 @@ import {
   PenTool,
   KeyRound,
   LogOut,
+  Loader2,
   Menu,
   X,
 } from "lucide-react";
@@ -62,6 +63,7 @@ export default function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
 
   const navItems =
     profile.role === "admin"
@@ -83,9 +85,10 @@ export default function AppShell({
     if (tc) tc.setAttribute("content", meta.themeColor);
   }, [settings.tema]);
 
-  // Tutup drawer otomatis saat berpindah halaman
+  // Tutup drawer & reset indikator loading otomatis saat berpindah halaman
   useEffect(() => {
     setOpen(false);
+    setPendingHref(null);
   }, [pathname]);
 
   // Tutup drawer dengan tombol Escape & kunci scroll body saat drawer terbuka
@@ -121,23 +124,32 @@ export default function AppShell({
         {navItems.map((item) => {
           const Icon = item.icon;
           const active = isActiveRoute(item.href);
+          const loading = pendingHref === item.href && !active;
           return (
             <Link
               key={item.href}
               href={item.href}
-              onClick={onSelect}
+              onClick={() => {
+                if (!active) setPendingHref(item.href);
+                onSelect?.();
+              }}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition ${
                 active
                   ? "cbt-nav-item-active font-semibold"
+                  : loading
+                  ? "cbt-nav-item-active font-medium opacity-85"
                   : "cbt-nav-item font-medium"
               }`}
             >
               <Icon
                 className={`w-4 h-4 shrink-0 ${
-                  active ? "cbt-nav-icon-active" : "cbt-nav-icon"
+                  active || loading ? "cbt-nav-icon-active" : "cbt-nav-icon"
                 }`}
               />
-              <span className="truncate">{item.label}</span>
+              <span className="truncate flex-1">{item.label}</span>
+              {loading && (
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 opacity-80" />
+              )}
             </Link>
           );
         })}

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { getSchoolSettings } from "@/lib/server-auth";
 import { getThemeMeta } from "@/lib/themes";
+import NavigationProgress from "@/components/NavigationProgress";
 import "./globals.css";
 
 const plusJakartaSans = Plus_Jakarta_Sans({
@@ -42,6 +43,7 @@ export default async function RootLayout({
       className={`light ${plusJakartaSans.variable}`}
     >
       <body className="min-h-[100dvh] cbt-canvas antialiased selection:bg-blue-100 selection:text-blue-900">
+        <NavigationProgress />
         {children}
       </body>
     </html>
