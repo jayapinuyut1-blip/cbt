@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { compressImageFile } from "@/lib/image";
 import { questionTypeLabel } from "@/lib/format";
 import { fetchAllowedSubjectsForCurrentUser } from "@/lib/teacher-subjects";
+import AiQuestionModal from "@/components/AiQuestionModal";
 import type { Question, QuestionType, Subject } from "@/types/cbt";
 import {
   Plus,
@@ -15,6 +16,7 @@ import {
   Edit3,
   Image as ImageIcon,
   X,
+  Sparkles,
 } from "lucide-react";
 
 interface DraftOption {
@@ -50,6 +52,7 @@ export default function GuruBankSoalPage() {
   const [uploadingImg, setUploadingImg] = useState(false);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [showAiModal, setShowAiModal] = useState(false);
 
   useEffect(() => {
     fetchAllowedSubjectsForCurrentUser(supabase).then(({ userId: uid, subjects: list }) => {
@@ -293,12 +296,24 @@ export default function GuruBankSoalPage() {
         Tipe: "pg",
         Pertanyaan: "Apa tujuan utama pengolahan tanah sebelum penanaman?",
         Bobot: 1,
-        Opsi_A: "Membunuh semua mikroba",
+        Opsi_A: "Membunuh semua mikroba tanah",
         Opsi_B: "Menggemburkan tanah dan memperbaiki aerasi",
-        Opsi_C: "Mengurangi kadar air",
-        Opsi_D: "Memadatkan tanah",
+        Opsi_C: "Mengurangi kadar air secara drastis",
+        Opsi_D: "Memadatkan lapisan tanah",
         Opsi_E: "Mengubah warna tanah",
         Kunci: "B",
+        Pasangan: "",
+      },
+      {
+        Tipe: "pg",
+        Pertanyaan: "Teknik pembiakan vegetatif dengan menyambung pucuk batang atas dan batang bawah disebut...",
+        Bobot: 1,
+        Opsi_A: "Mencangkok",
+        Opsi_B: "Menyetek",
+        Opsi_C: "Mengenten (Grafting)",
+        Opsi_D: "Merunduk",
+        Opsi_E: "Okulasi",
+        Kunci: "C",
         Pasangan: "",
       },
       {
@@ -315,7 +330,7 @@ export default function GuruBankSoalPage() {
       },
       {
         Tipe: "jodoh",
-        Pertanyaan: "Pasangkan jenis pupuk dengan unsur hara utamanya:",
+        Pertanyaan: "Pasangkan jenis pupuk berikut dengan unsur hara utamanya:",
         Bobot: 3,
         Opsi_A: "",
         Opsi_B: "",
@@ -339,8 +354,34 @@ export default function GuruBankSoalPage() {
       },
     ];
     const ws = XLSX.utils.json_to_sheet(sample);
+    ws["!cols"] = [
+      { wch: 10 },
+      { wch: 52 },
+      { wch: 8 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 42 },
+    ];
+
+    const guide = [
+      { Kolom: "Tipe", Keterangan: "Wajib diisi salah satu: pg | isian | jodoh | essay (huruf kecil)." },
+      { Kolom: "Pertanyaan", Keterangan: "Teks soal lengkap. Jika soal butuh gambar, tambahkan gambar setelah impor." },
+      { Kolom: "Bobot", Keterangan: "Angka bobot nilai soal (contoh: PG=1, Isian=2, Jodoh=3, Essay=5)." },
+      { Kolom: "Opsi_A s.d. Opsi_E", Keterangan: "Khusus tipe pg. Kosongkan Opsi_E jika hanya 4 pilihan (A-D)." },
+      { Kolom: "Kunci", Keterangan: "Untuk pg: isi huruf A/B/C/D/E. Untuk isian: isi kunci jawaban, pisahkan variasi dengan tanda | (contoh: fotosintesis|photosynthesis)." },
+      { Kolom: "Pasangan", Keterangan: "Khusus tipe jodoh: format Kiri=Kanan dan pisahkan antar pasangan dengan | (contoh: Urea=Nitrogen|KCl=Kalium)." },
+      { Kolom: "Tips", Keterangan: "Jangan ubah nama judul kolom di baris pertama sheet 'Template Soal'." },
+    ];
+    const wsGuide = XLSX.utils.json_to_sheet(guide);
+    wsGuide["!cols"] = [{ wch: 20 }, { wch: 95 }];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Template Soal");
+    XLSX.utils.book_append_sheet(wb, wsGuide, "Panduan Pengisian");
     XLSX.writeFile(wb, "template-bank-soal-cbt.xlsx");
   }
 
@@ -528,13 +569,22 @@ export default function GuruBankSoalPage() {
             Kelola soal Pilihan Ganda, Isian Singkat, Menjodohkan, dan Essay per mata pelajaran.
           </p>
         </div>
-        <button
-          onClick={openNewModal}
-          disabled={!selectedSubjectId}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white rounded-lg text-sm font-semibold cursor-pointer"
-        >
-          <Plus className="w-4 h-4" /> Tambah Soal
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setShowAiModal(true)}
+            disabled={!selectedSubjectId}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 text-white rounded-lg text-sm font-semibold cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4" /> Buat Soal dengan AI
+          </button>
+          <button
+            onClick={openNewModal}
+            disabled={!selectedSubjectId}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white rounded-lg text-sm font-semibold cursor-pointer"
+          >
+            <Plus className="w-4 h-4" /> Tambah Soal
+          </button>
+        </div>
       </div>
 
       {/* Filter & Impor/Ekspor */}
@@ -959,6 +1009,19 @@ export default function GuruBankSoalPage() {
             </form>
           </div>
         </div>
+      )}
+      {/* Modal Mode AI Generator Soal */}
+      {showAiModal && selectedSubjectId && (
+        <AiQuestionModal
+          subjectId={Number(selectedSubjectId)}
+          subjectName={
+            subjects.find((s) => String(s.id) === selectedSubjectId)?.nama ||
+            "Mata Pelajaran"
+          }
+          userId={userId}
+          onClose={() => setShowAiModal(false)}
+          onSaved={() => loadQuestions()}
+        />
       )}
     </div>
   );
