@@ -4,6 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { generateExamToken } from "@/lib/auth-utils";
 import { formatDateTime } from "@/lib/format";
+import {
+  combineDateAndTimeToIso,
+  getDayNameId,
+  getSlotsForDate,
+  isFridayDate,
+  type ExamSlotKey,
+} from "@/lib/exam-slots";
 import type {
   Exam,
   ExamOverride,
@@ -27,10 +34,16 @@ export default function AdminJadwalPage() {
     alamat_sekolah: "",
   });
 
-  // Form Jadwal
+  // Form Jadwal (Preset Jam II / Jam III + Deteksi Hari Jumat)
   const [examId, setExamId] = useState("");
   const [kelasId, setKelasId] = useState("");
-  const [sesi, setSesi] = useState("Sesi 1");
+  const [examDate, setExamDate] = useState(() => {
+    const dt = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  });
+  const [slotKey, setSlotKey] = useState<ExamSlotKey>("jam_2");
+  const [sesi, setSesi] = useState("Jam II");
   const [mulai, setMulai] = useState("");
   const [selesai, setSelesai] = useState("");
 
@@ -94,20 +107,49 @@ export default function AdminJadwalPage() {
 
   async function addSchedule(e: React.FormEvent) {
     e.preventDefault();
-    if (!examId || !kelasId || !mulai || !selesai) return;
+    if (!examId || !kelasId) return;
+
+    let mulaiIso = "";
+    let selesaiIso = "";
+    let sesiFinal = sesi.trim() || "Jam II";
+    let autoDuration: number | null = null;
+
+    if (slotKey !== "manual") {
+      if (!examDate) return;
+      const slot = getSlotsForDate(examDate).find((s) => s.key === slotKey);
+      if (!slot) return;
+      mulaiIso = combineDateAndTimeToIso(examDate, slot.startTime);
+      selesaiIso = combineDateAndTimeToIso(examDate, slot.endTime);
+      sesiFinal = slot.sesiLabel;
+      autoDuration = slot.durationMinutes;
+    } else {
+      if (!mulai || !selesai) return;
+      mulaiIso = new Date(mulai).toISOString();
+      selesaiIso = new Date(selesai).toISOString();
+    }
+
     const { error } = await supabase.from("exam_schedules").insert({
       exam_id: Number(examId),
       kelas_id: Number(kelasId),
-      sesi: sesi.trim() || "Sesi 1",
-      mulai: new Date(mulai).toISOString(),
-      selesai: new Date(selesai).toISOString(),
+      sesi: sesiFinal,
+      mulai: mulaiIso,
+      selesai: selesaiIso,
     });
-    if (error) alert(error.message);
-    else {
-      setMulai("");
-      setSelesai("");
-      loadAll();
+    if (error) {
+      alert(error.message);
+      return;
     }
+
+    if (autoDuration) {
+      await supabase
+        .from("exams")
+        .update({ durasi: autoDuration })
+        .eq("id", Number(examId));
+    }
+
+    setMulai("");
+    setSelesai("");
+    loadAll();
   }
 
   async function deleteSchedule(id: number) {
@@ -326,8 +368,16 @@ export default function AdminJadwalPage() {
         onSubmit={addSchedule}
         className="bg-white rounded-xl border border-slate-200 p-5 space-y-4"
       >
-        <h2 className="font-semibold text-slate-900">Tambah Jadwal Ujian</h2>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-semibold text-slate-900">Tambah Jadwal Ujian</h2>
+          {slotKey !== "manual" && examDate && (
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 font-medium">
+              Hari {getDayNameId(examDate)}
+              {isFridayDate(examDate) ? " (Jadwal Khusus Jumat)" : ""} — Durasi ujian otomatis diselaraskan
+            </span>
+          )}
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <select
             required
             value={examId}
@@ -355,29 +405,59 @@ export default function AdminJadwalPage() {
             ))}
           </select>
           <input
-            type="text"
-            value={sesi}
-            onChange={(e) => setSesi(e.target.value)}
-            placeholder="Sesi (misal: Sesi 1)"
+            type="date"
+            required={slotKey !== "manual"}
+            value={examDate}
+            onChange={(e) => setExamDate(e.target.value)}
             className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
+            title="Tanggal Ujian"
           />
-          <input
-            type="datetime-local"
-            required
-            value={mulai}
-            onChange={(e) => setMulai(e.target.value)}
+          <select
+            value={slotKey}
+            onChange={(e) => {
+              const v = e.target.value as ExamSlotKey;
+              setSlotKey(v);
+              if (v === "jam_2") setSesi("Jam II");
+              else if (v === "jam_3") setSesi("Jam III");
+            }}
             className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
-            title="Waktu Mulai"
-          />
-          <input
-            type="datetime-local"
-            required
-            value={selesai}
-            onChange={(e) => setSelesai(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
-            title="Waktu Selesai"
-          />
+          >
+            {getSlotsForDate(examDate).map((sl) => (
+              <option key={sl.key} value={sl.key}>
+                {sl.label}
+              </option>
+            ))}
+            <option value="manual">Manual (Pilih Jam Sendiri)</option>
+          </select>
         </div>
+
+        {slotKey === "manual" && (
+          <div className="grid sm:grid-cols-3 gap-3">
+            <input
+              type="text"
+              value={sesi}
+              onChange={(e) => setSesi(e.target.value)}
+              placeholder="Sesi (misal: Sesi 1)"
+              className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
+            />
+            <input
+              type="datetime-local"
+              required
+              value={mulai}
+              onChange={(e) => setMulai(e.target.value)}
+              className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
+              title="Waktu Mulai"
+            />
+            <input
+              type="datetime-local"
+              required
+              value={selesai}
+              onChange={(e) => setSelesai(e.target.value)}
+              className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
+              title="Waktu Selesai"
+            />
+          </div>
+        )}
         <button
           type="submit"
           className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium cursor-pointer"
