@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import { fetchAllowedSubjectsForCurrentUser } from "@/lib/teacher-subjects";
+import { questionTypeLabel } from "@/lib/format";
 import {
   aggregateGradesByStudent,
   remedialRuleLabel,
@@ -11,8 +12,15 @@ import {
   type RemedialRule,
 } from "@/lib/remedial";
 import RemedialModal from "@/components/RemedialModal";
-import type { Exam } from "@/types/cbt";
-import { CheckCircle2, FileSpreadsheet, PenTool, RotateCcw } from "lucide-react";
+import type { Exam, QuestionType } from "@/types/cbt";
+import {
+  CheckCircle2,
+  FileSpreadsheet,
+  PenTool,
+  RotateCcw,
+  BarChart3,
+  AlertTriangle,
+} from "lucide-react";
 
 interface EssayAnswerRow {
   id: number;
@@ -38,19 +46,91 @@ interface EssayAnswerRow {
   } | null;
 }
 
+interface AllAnswerRow {
+  id: number;
+  attempt_id: number;
+  question_id: number;
+  jawaban: {
+    option_id?: number | null;
+    text?: string;
+    pairs?: Record<string, string>;
+  } | null;
+  skor: number | null;
+  questions: {
+    id: number;
+    teks: string;
+    bobot: number;
+    tipe: QuestionType;
+    question_options?: Array<{
+      id: number;
+      urutan: number;
+      teks: string;
+      pasangan: string | null;
+      benar: boolean;
+    }>;
+  } | null;
+}
+
+type DifficultyCategory = "Mudah" | "Sedang" | "Sulit" | "Belum Dinilai";
+
+interface QuestionItemAnalysis {
+  question_id: number;
+  tipe: QuestionType;
+  teks: string;
+  bobot: number;
+  responden: number;
+  gradedCount: number;
+  benarPenuh: number;
+  parsial: number;
+  salah: number;
+  belumDinilai: number;
+  tingkatPenguasaan: number | null; // 0..100%
+  kategori: DifficultyCategory;
+  optionStats: Array<{
+    id: number;
+    letter: string;
+    teks: string;
+    benar: boolean;
+    pickedCount: number;
+    pickedPct: number;
+  }>;
+  topDistractor: {
+    letter: string;
+    pickedPct: number;
+  } | null;
+}
+
 export default function GuruKoreksiPage() {
   const supabase = createClient();
   const [exams, setExams] = useState<Exam[]>([]);
   const [selectedExamId, setSelectedExamId] = useState("");
-  const [tab, setTab] = useState<"essay" | "nilai">("essay");
+  const [tab, setTab] = useState<"essay" | "nilai" | "analisis">("essay");
+  const [difficultyFilter, setDifficultyFilter] = useState<
+    "semua" | "Sulit" | "Sedang" | "Mudah"
+  >("semua");
 
   const [essayRows, setEssayRows] = useState<EssayAnswerRow[]>([]);
+  const [allAnswerRows, setAllAnswerRows] = useState<AllAnswerRow[]>([]);
   const [scoreInputs, setScoreInputs] = useState<Record<number, string>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
   const [rawAttempts, setRawAttempts] = useState<RawStudentAttempt[]>([]);
 
   const [remedialModalOpen, setRemedialModalOpen] = useState(false);
   const [remedialPreselect, setRemedialPreselect] = useState<string[]>([]);
+
+  // Baca parameter URL opsional (?examId=...&tab=essay|nilai|analisis)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const qTab = sp.get("tab");
+    if (qTab === "essay" || qTab === "nilai" || qTab === "analisis") {
+      setTab(qTab);
+    }
+    const qExamId = sp.get("examId");
+    if (qExamId) {
+      setSelectedExamId(qExamId);
+    }
+  }, []);
 
   const loadExams = useCallback(async () => {
     const { subjects: allowedSub } =
@@ -68,8 +148,11 @@ export default function GuruKoreksiPage() {
       .order("id", { ascending: false });
     const list = (data || []) as Exam[];
     setExams(list);
-    if (list[0] && !selectedExamId) setSelectedExamId(String(list[0].id));
-  }, [supabase, selectedExamId]);
+    setSelectedExamId((prev) => {
+      if (prev && list.some((e) => String(e.id) === prev)) return prev;
+      return list[0] ? String(list[0].id) : "";
+    });
+  }, [supabase]);
 
   useEffect(() => {
     loadExams();
@@ -92,20 +175,37 @@ export default function GuruKoreksiPage() {
     const attIds = attList.map((a) => a.id);
     if (attIds.length === 0) {
       setEssayRows([]);
+      setAllAnswerRows([]);
       return;
     }
 
-    const { data: ans } = await supabase
-      .from("answers")
-      .select(
-        "id, attempt_id, question_id, jawaban, skor, questions!inner(teks, bobot, tipe), attempts!inner(id, exam_id, attempt_ke, status, profiles(nama, username, classes(nama)))"
-      )
-      .in("attempt_id", attIds)
-      .eq("questions.tipe", "essay")
-      .order("id");
+    const submittedAttIds = attList
+      .filter((a) => a.status !== "mengerjakan")
+      .map((a) => a.id);
+
+    const [{ data: ans }, { data: allAns }] = await Promise.all([
+      supabase
+        .from("answers")
+        .select(
+          "id, attempt_id, question_id, jawaban, skor, questions!inner(teks, bobot, tipe), attempts!inner(id, exam_id, attempt_ke, status, profiles(nama, username, classes(nama)))"
+        )
+        .in("attempt_id", attIds)
+        .eq("questions.tipe", "essay")
+        .order("id"),
+      submittedAttIds.length > 0
+        ? supabase
+            .from("answers")
+            .select(
+              "id, attempt_id, question_id, jawaban, skor, questions!inner(id, teks, bobot, tipe, question_options(id, urutan, teks, pasangan, benar))"
+            )
+            .in("attempt_id", submittedAttIds)
+            .order("question_id")
+        : Promise.resolve({ data: [] }),
+    ]);
 
     const list = (ans || []) as unknown as EssayAnswerRow[];
     setEssayRows(list);
+    setAllAnswerRows((allAns || []) as unknown as AllAnswerRow[]);
 
     const initialScores: Record<number, string> = {};
     list.forEach((row) => {
@@ -128,6 +228,148 @@ export default function GuruKoreksiPage() {
   }, [rawAttempts, selectedExam, remedialRule]);
 
   const belowKkmList = aggregated.filter((a) => a.needs_remedial);
+
+  // Perhitungan Analisis Butir Soal Otomatis
+  const itemAnalysis = useMemo<QuestionItemAnalysis[]>(() => {
+    if (allAnswerRows.length === 0) return [];
+    const map = new Map<
+      number,
+      {
+        q: NonNullable<AllAnswerRow["questions"]>;
+        rows: AllAnswerRow[];
+      }
+    >();
+
+    for (const row of allAnswerRows) {
+      if (!row.questions) continue;
+      const existing = map.get(row.question_id);
+      if (existing) {
+        existing.rows.push(row);
+      } else {
+        map.set(row.question_id, { q: row.questions, rows: [row] });
+      }
+    }
+
+    const result: QuestionItemAnalysis[] = [];
+    for (const [qid, group] of map.entries()) {
+      const { q, rows } = group;
+      const bobot = Number(q.bobot) || 1;
+      const responden = rows.length;
+      let gradedCount = 0;
+      let benarPenuh = 0;
+      let parsial = 0;
+      let salah = 0;
+      let belumDinilai = 0;
+      let ratioSum = 0;
+
+      const optionPickCounts = new Map<number, number>();
+
+      for (const r of rows) {
+        if (q.tipe === "pg" && r.jawaban?.option_id != null) {
+          const oid = Number(r.jawaban.option_id);
+          optionPickCounts.set(oid, (optionPickCounts.get(oid) || 0) + 1);
+        }
+        if (r.skor === null || r.skor === undefined) {
+          belumDinilai += 1;
+        } else {
+          gradedCount += 1;
+          const sc = Number(r.skor);
+          ratioSum += Math.min(1, Math.max(0, sc / bobot));
+          if (sc >= bobot - 0.01) benarPenuh += 1;
+          else if (sc > 0) parsial += 1;
+          else salah += 1;
+        }
+      }
+
+      const tingkatPenguasaan =
+        gradedCount > 0
+          ? Math.round((ratioSum / gradedCount) * 1000) / 10
+          : null;
+
+      let kategori: DifficultyCategory = "Belum Dinilai";
+      if (tingkatPenguasaan !== null) {
+        if (tingkatPenguasaan > 75) kategori = "Mudah";
+        else if (tingkatPenguasaan >= 30) kategori = "Sedang";
+        else kategori = "Sulit";
+      }
+
+      const sortedOpts = [...(q.question_options || [])].sort(
+        (a, b) => a.urutan - b.urutan
+      );
+      const optionStats =
+        q.tipe === "pg"
+          ? sortedOpts.map((opt, idx) => {
+              const pickedCount = optionPickCounts.get(opt.id) || 0;
+              const pickedPct =
+                responden > 0
+                  ? Math.round((pickedCount / responden) * 1000) / 10
+                  : 0;
+              return {
+                id: opt.id,
+                letter: String.fromCharCode(65 + idx),
+                teks: opt.teks,
+                benar: opt.benar,
+                pickedCount,
+                pickedPct,
+              };
+            })
+          : [];
+
+      const wrongOpts = optionStats
+        .filter((o) => !o.benar && o.pickedCount > 0)
+        .sort((a, b) => b.pickedCount - a.pickedCount);
+      const topDistractor =
+        wrongOpts[0] && wrongOpts[0].pickedPct >= 25
+          ? { letter: wrongOpts[0].letter, pickedPct: wrongOpts[0].pickedPct }
+          : null;
+
+      result.push({
+        question_id: qid,
+        tipe: q.tipe,
+        teks: q.teks,
+        bobot,
+        responden,
+        gradedCount,
+        benarPenuh,
+        parsial,
+        salah,
+        belumDinilai,
+        tingkatPenguasaan,
+        kategori,
+        optionStats,
+        topDistractor,
+      });
+    }
+
+    return result.sort((a, b) => a.question_id - b.question_id);
+  }, [allAnswerRows]);
+
+  const analysisSummary = useMemo(() => {
+    const total = itemAnalysis.length;
+    const mudah = itemAnalysis.filter((i) => i.kategori === "Mudah").length;
+    const sedang = itemAnalysis.filter((i) => i.kategori === "Sedang").length;
+    const sulit = itemAnalysis.filter((i) => i.kategori === "Sulit").length;
+    const gradedItems = itemAnalysis.filter(
+      (i) => i.tingkatPenguasaan !== null
+    );
+    const avgPenguasaan =
+      gradedItems.length > 0
+        ? Math.round(
+            (gradedItems.reduce(
+              (acc, item) => acc + (item.tingkatPenguasaan || 0),
+              0
+            ) /
+              gradedItems.length) *
+              10
+          ) / 10
+        : null;
+    return { total, mudah, sedang, sulit, avgPenguasaan };
+  }, [itemAnalysis]);
+
+  const filteredAnalysis = useMemo(() => {
+    if (difficultyFilter === "semua") return itemAnalysis;
+    return itemAnalysis.filter((i) => i.kategori === difficultyFilter);
+  }, [itemAnalysis, difficultyFilter]);
 
   async function saveEssayScore(row: EssayAnswerRow) {
     const raw = scoreInputs[row.id];
@@ -185,16 +427,48 @@ export default function GuruKoreksiPage() {
     );
   }
 
+  function exportAnalisisExcel() {
+    if (!selectedExam || itemAnalysis.length === 0) return;
+    const data = itemAnalysis.map((item, idx) => ({
+      "No Soal": idx + 1,
+      "ID Soal": item.question_id,
+      Tipe: questionTypeLabel(item.tipe),
+      "Ringkasan Soal": item.teks.slice(0, 140),
+      "Bobot Maks": item.bobot,
+      Responden: item.responden,
+      "Benar Penuh": item.benarPenuh,
+      Parsial: item.parsial,
+      Salah: item.salah,
+      "Belum Dinilai": item.belumDinilai,
+      "Penguasaan (%)":
+        item.tingkatPenguasaan !== null ? item.tingkatPenguasaan : "-",
+      "Kategori Kesukaran": item.kategori,
+      "Distraktor Dominan (PG)": item.topDistractor
+        ? `Opsi ${item.topDistractor.letter} (${item.topDistractor.pickedPct}%)`
+        : "-",
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Analisis Butir Soal");
+    XLSX.writeFile(
+      wb,
+      `analisis-butir-soal-${selectedExam.judul.replace(
+        /[^a-zA-Z0-9_-]/g,
+        "_"
+      )}.xlsx`
+    );
+  }
+
   const ungradedCount = essayRows.filter((r) => r.skor === null).length;
 
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">
-          Koreksi Essay, Nilai & Remedial
+          Koreksi Essay, Nilai & Analisis Butir Soal
         </h1>
         <p className="text-sm text-slate-500">
-          Beri skor jawaban essay siswa, pantau nilai akhir, dan buka ujian remedial 1-klik untuk siswa di bawah KKM.
+          Beri skor jawaban essay siswa, pantau rekap nilai & remedial, serta evaluasi tingkat kesukaran tiap nomor soal.
         </p>
       </div>
 
@@ -218,8 +492,17 @@ export default function GuruKoreksiPage() {
               {(["pg", "isian", "jodoh", "essay"] as const)
                 .filter((k) => Number(selectedExam.bobot_tipe?.[k] ?? 0) > 0)
                 .map((k) => (
-                  <span key={k} className="px-1.5 py-0.5 bg-white rounded border border-purple-200 font-medium">
-                    {k === "pg" ? "PG" : k === "isian" ? "Isian" : k === "jodoh" ? "Jodoh" : "Essay"}{" "}
+                  <span
+                    key={k}
+                    className="px-1.5 py-0.5 bg-white rounded border border-purple-200 font-medium"
+                  >
+                    {k === "pg"
+                      ? "PG"
+                      : k === "isian"
+                      ? "Isian"
+                      : k === "jodoh"
+                      ? "Jodoh"
+                      : "Essay"}{" "}
                     {selectedExam.bobot_tipe?.[k]}%
                   </span>
                 ))}
@@ -230,26 +513,37 @@ export default function GuruKoreksiPage() {
           )}
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setTab("essay")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer ${
+            className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium cursor-pointer ${
               tab === "essay"
                 ? "bg-blue-600 text-white"
-                : "bg-slate-100 text-slate-700"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
             }`}
           >
-            Koreksi Essay ({ungradedCount} belum dinilai)
+            Koreksi Essay ({ungradedCount})
           </button>
           <button
             onClick={() => setTab("nilai")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer ${
+            className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium cursor-pointer ${
               tab === "nilai"
                 ? "bg-blue-600 text-white"
-                : "bg-slate-100 text-slate-700"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
             }`}
           >
-            Rekap Nilai & Remedial ({aggregated.length})
+            Rekap Nilai ({aggregated.length})
+          </button>
+          <button
+            onClick={() => setTab("analisis")}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium cursor-pointer ${
+              tab === "analisis"
+                ? "bg-blue-600 text-white"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+          >
+            <BarChart3 className="w-4 h-4" />
+            Analisis Butir Soal ({itemAnalysis.length})
           </button>
         </div>
       </div>
@@ -344,7 +638,7 @@ export default function GuruKoreksiPage() {
             </div>
           )}
         </div>
-      ) : (
+      ) : tab === "nilai" ? (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="p-4 border-b border-slate-200 flex flex-wrap justify-between items-center gap-2">
             <div>
@@ -459,6 +753,228 @@ export default function GuruKoreksiPage() {
             </table>
           </div>
         </div>
+      ) : (
+        /* TAB 3: ANALISIS BUTIR SOAL OTOMATIS */
+        <div className="space-y-4">
+          {/* Ringkasan Kategori Kesukaran */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="text-xs text-slate-500">Soal Dianalisis</div>
+              <div className="text-2xl font-bold text-slate-900 mt-0.5">
+                {analysisSummary.total}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Rata-rata penguasaan:{" "}
+                <strong>
+                  {analysisSummary.avgPenguasaan !== null
+                    ? `${analysisSummary.avgPenguasaan}%`
+                    : "-"}
+                </strong>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl border border-emerald-200 p-4">
+              <div className="text-xs text-emerald-700 font-medium">
+                Kategori Mudah (&gt;75%)
+              </div>
+              <div className="text-2xl font-bold text-emerald-700 mt-0.5">
+                {analysisSummary.mudah}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Mayoritas siswa menjawab benar
+              </div>
+            </div>
+            <div className="bg-white rounded-xl border border-blue-200 p-4">
+              <div className="text-xs text-blue-700 font-medium">
+                Kategori Sedang (30–75%)
+              </div>
+              <div className="text-2xl font-bold text-blue-700 mt-0.5">
+                {analysisSummary.sedang}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Daya pembeda ideal
+              </div>
+            </div>
+            <div className="bg-white rounded-xl border border-rose-200 p-4">
+              <div className="text-xs text-rose-700 font-medium">
+                Kategori Sulit (&lt;30%)
+              </div>
+              <div className="text-2xl font-bold text-rose-700 mt-0.5">
+                {analysisSummary.sulit}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Perlu evaluasi materi / soal
+              </div>
+            </div>
+          </div>
+
+          {/* Filter & Ekspor Excel */}
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-1.5 text-xs">
+              {(["semua", "Sulit", "Sedang", "Mudah"] as const).map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setDifficultyFilter(cat)}
+                  className={`px-3 py-1.5 rounded-lg font-medium cursor-pointer transition ${
+                    difficultyFilter === cat
+                      ? "bg-slate-900 text-white"
+                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  }`}
+                >
+                  {cat === "semua" ? "Semua Soal" : cat}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={exportAnalisisExcel}
+              disabled={itemAnalysis.length === 0}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-lg text-xs font-semibold cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4" /> Ekspor Analisis Excel
+            </button>
+          </div>
+
+          {/* Daftar Kartu Analisis per Nomor Soal */}
+          <div className="space-y-3">
+            {filteredAnalysis.map((item, idx) => {
+              const badgeColor =
+                item.kategori === "Mudah"
+                  ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+                  : item.kategori === "Sedang"
+                  ? "bg-blue-100 text-blue-800 border-blue-200"
+                  : item.kategori === "Sulit"
+                  ? "bg-rose-100 text-rose-800 border-rose-200"
+                  : "bg-amber-100 text-amber-800 border-amber-200";
+              const barColor =
+                item.kategori === "Mudah"
+                  ? "bg-emerald-500"
+                  : item.kategori === "Sedang"
+                  ? "bg-blue-500"
+                  : item.kategori === "Sulit"
+                  ? "bg-rose-500"
+                  : "bg-amber-400";
+
+              return (
+                <div
+                  key={item.question_id}
+                  className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 space-y-3"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-lg bg-slate-900 text-white font-bold text-xs">
+                        Butir #{idx + 1}
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium">
+                        {questionTypeLabel(item.tipe)} (Bobot {item.bobot})
+                      </span>
+                      <span
+                        className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${badgeColor}`}
+                      >
+                        {item.kategori}
+                        {item.tingkatPenguasaan !== null
+                          ? ` • ${item.tingkatPenguasaan}%`
+                          : ""}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Responden: <strong>{item.responden}</strong> • Benar:{" "}
+                      <strong className="text-emerald-700">
+                        {item.benarPenuh}
+                      </strong>
+                      {item.parsial > 0 && (
+                        <>
+                          {" "}
+                          • Parsial:{" "}
+                          <strong className="text-blue-700">
+                            {item.parsial}
+                          </strong>
+                        </>
+                      )}{" "}
+                      • Salah:{" "}
+                      <strong className="text-rose-700">{item.salah}</strong>
+                      {item.belumDinilai > 0 && (
+                        <>
+                          {" "}
+                          • Belum dinilai:{" "}
+                          <strong className="text-amber-700">
+                            {item.belumDinilai}
+                          </strong>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Bar Persentase Penguasaan */}
+                  {item.tingkatPenguasaan !== null && (
+                    <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+                      <div
+                        style={{ width: `${item.tingkatPenguasaan}%` }}
+                        className={`h-full rounded-full ${barColor}`}
+                      />
+                    </div>
+                  )}
+
+                  <div className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">
+                    {item.teks}
+                  </div>
+
+                  {/* Peringatan Distraktor Dominan (jika ada opsi pengecoh dipilih >= 25% siswa) */}
+                  {item.topDistractor && (
+                    <div className="text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-3 py-2 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>
+                        Pengecoh kuat terdeteksi: <strong>Opsi {item.topDistractor.letter}</strong>{" "}
+                        (salah) dipilih oleh <strong>{item.topDistractor.pickedPct}%</strong> siswa.
+                        Periksa kembali apakah materi atau redaksi soal membingungkan.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Distribusi Pilihan Opsi untuk Soal PG */}
+                  {item.tipe === "pg" && item.optionStats.length > 0 && (
+                    <div className="grid sm:grid-cols-2 gap-2 pt-1">
+                      {item.optionStats.map((opt) => (
+                        <div
+                          key={opt.id}
+                          className={`rounded-lg border px-3 py-2 text-xs space-y-1 ${
+                            opt.benar
+                              ? "bg-emerald-50/70 border-emerald-300 text-emerald-950"
+                              : "bg-slate-50 border-slate-200 text-slate-700"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold truncate">
+                              {opt.letter}. {opt.teks}
+                              {opt.benar ? " ✓ (Kunci)" : ""}
+                            </span>
+                            <span className="font-mono font-bold shrink-0">
+                              {opt.pickedCount} ({opt.pickedPct}%)
+                            </span>
+                          </div>
+                          <div className="h-1.5 w-full rounded-full bg-white/80 overflow-hidden">
+                            <div
+                              style={{ width: `${opt.pickedPct}%` }}
+                              className={`h-full rounded-full ${
+                                opt.benar ? "bg-emerald-500" : "bg-slate-400"
+                              }`}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {filteredAnalysis.length === 0 && (
+              <div className="bg-white rounded-xl border border-slate-200 p-10 text-center text-slate-400 text-sm">
+                {itemAnalysis.length === 0
+                  ? "Belum ada jawaban siswa yang terkumpul untuk dianalisis pada ujian ini."
+                  : `Tidak ada soal pada kategori "${difficultyFilter}".`}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {remedialModalOpen && selectedExam && (
@@ -470,10 +986,7 @@ export default function GuruKoreksiPage() {
           candidates={aggregated}
           preselectedIds={remedialPreselect}
           onClose={() => setRemedialModalOpen(false)}
-          onSuccess={() => {
-            loadExams();
-            loadData();
-          }}
+          onSuccess={loadData}
         />
       )}
     </div>

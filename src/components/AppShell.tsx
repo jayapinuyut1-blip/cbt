@@ -43,7 +43,7 @@ const GURU_NAV: NavItem[] = [
   { href: "/guru", label: "Beranda", icon: LayoutDashboard },
   { href: "/guru/bank-soal", label: "Bank Soal", icon: FileText },
   { href: "/guru/ujian", label: "Kelola Ujian", icon: ClipboardList },
-  { href: "/guru/koreksi", label: "Koreksi Essay & Nilai", icon: PenTool },
+  { href: "/guru/koreksi", label: "Koreksi, Nilai & Analisis", icon: PenTool },
 ];
 
 const SISWA_NAV: NavItem[] = [
