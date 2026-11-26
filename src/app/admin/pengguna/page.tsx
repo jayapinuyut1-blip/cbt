@@ -27,6 +27,7 @@ import {
   FileText,
   Users,
   Search,
+  Edit3,
 } from "lucide-react";
 
 export default function AdminPenggunaPage() {
@@ -46,6 +47,16 @@ export default function AdminPenggunaPage() {
     logo: "",
     alamat_sekolah: "",
   });
+
+  // Modal Edit Pengguna (CRUD Update)
+  const [editUser, setEditUser] = useState<Profile | null>(null);
+  const [editUsername, setEditUsername] = useState("");
+  const [editNama, setEditNama] = useState("");
+  const [editKelasId, setEditKelasId] = useState("");
+  const [editAktif, setEditAktif] = useState(true);
+  const [editBlocked, setEditBlocked] = useState(false);
+  const [editNewPassword, setEditNewPassword] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Modal Pasangan Mapel Guru
   const [mapelModalUser, setMapelModalUser] = useState<Profile | null>(null);
@@ -188,6 +199,78 @@ export default function AdminPenggunaPage() {
         alert(
           `Berhasil memasangkan ${data.updatedCount} siswa ke "${targetName}".`
         );
+        setSelectedStudentIds([]);
+        loadData();
+      }
+    } finally {
+      setBulkProcessing(false);
+    }
+  }
+
+  function openEditModal(u: Profile) {
+    setEditUser(u);
+    setEditUsername(u.username);
+    setEditNama(u.nama);
+    setEditKelasId(u.kelas_id ? String(u.kelas_id) : "");
+    setEditAktif(u.aktif);
+    setEditBlocked(u.is_blocked);
+    setEditNewPassword("");
+  }
+
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editUser) return;
+    setSavingEdit(true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editUser.id,
+          action: "update",
+          username: editUsername.trim(),
+          nama: editNama.trim(),
+          kelas_id:
+            editUser.role === "siswa" && editKelasId
+              ? Number(editKelasId)
+              : null,
+          aktif: editAktif,
+          is_blocked: editBlocked,
+          new_password: editNewPassword.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Gagal menyimpan perubahan.");
+      } else {
+        setEditUser(null);
+        loadData();
+      }
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function handleBulkDeleteStudents() {
+    if (selectedStudentIds.length === 0) return;
+    if (
+      !confirm(
+        `HAPUS PERMANEN ${selectedStudentIds.length} siswa terpilih beserta seluruh riwayat ujiannya? Tindakan ini tidak dapat dibatalkan.`
+      )
+    ) {
+      return;
+    }
+    setBulkProcessing(true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedStudentIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) alert(data.error || "Gagal menghapus siswa.");
+      else {
+        alert(`Berhasil menghapus ${data.deletedCount} akun siswa.`);
         setSelectedStudentIds([]);
         loadData();
       }
@@ -739,6 +822,16 @@ export default function AdminPenggunaPage() {
               <ArrowUpCircle className="w-4 h-4" />
               Naik Kelas Otomatis
             </button>
+
+            <button
+              type="button"
+              disabled={bulkProcessing || selectedStudentIds.length === 0}
+              onClick={handleBulkDeleteStudents}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 text-white rounded-lg text-xs sm:text-sm font-semibold cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4" />
+              Hapus Terpilih
+            </button>
           </div>
         </div>
       )}
@@ -878,6 +971,13 @@ export default function AdminPenggunaPage() {
                       </button>
                     )}
                     <button
+                      onClick={() => openEditModal(u)}
+                      title="Edit Data Pengguna"
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-medium cursor-pointer"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" /> Edit
+                    </button>
+                    <button
                       onClick={() => userAction(u.id, "reset_login")}
                       title="Reset Login (Izinkan login ulang di perangkat baru)"
                       className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 cursor-pointer"
@@ -927,6 +1027,131 @@ export default function AdminPenggunaPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Modal Edit Pengguna (CRUD Update) */}
+      {editUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-lg text-slate-900">
+                Edit Data{" "}
+                {editUser.role === "siswa"
+                  ? "Siswa"
+                  : editUser.role === "guru"
+                  ? "Guru"
+                  : "Admin"}
+              </h2>
+              <button
+                onClick={() => setEditUser(null)}
+                className="text-sm text-slate-500 hover:text-slate-900 cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  {editUser.role === "siswa" ? "NIS / Username" : "Username / NIP"}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editUsername}
+                  onChange={(e) => setEditUsername(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Nama Lengkap
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editNama}
+                  onChange={(e) => setEditNama(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                />
+              </div>
+
+              {editUser.role === "siswa" && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Kelas / Jurusan
+                  </label>
+                  <select
+                    value={editKelasId}
+                    onChange={(e) => setEditKelasId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+                  >
+                    <option value="">-- Belum Punya Kelas --</option>
+                    {classes.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nama}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Ganti Kata Sandi Baru{" "}
+                  <span className="text-slate-400 font-normal">
+                    (Opsional — kosongkan jika tidak diubah)
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  minLength={6}
+                  value={editNewPassword}
+                  onChange={(e) => setEditNewPassword(e.target.value)}
+                  placeholder="Minimal 6 karakter..."
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-5 pt-1 text-sm">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editAktif}
+                    onChange={(e) => setEditAktif(e.target.checked)}
+                  />
+                  <span>Akun Aktif (tidak lulus/nonaktif)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editBlocked}
+                    onChange={(e) => setEditBlocked(e.target.checked)}
+                  />
+                  <span className="text-rose-700">Diblokir</span>
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setEditUser(null)}
+                  className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEdit}
+                  className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-semibold cursor-pointer"
+                >
+                  {savingEdit ? "Menyimpan..." : "Simpan Perubahan"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal Atur Pasangan Mapel Guru */}
       {mapelModalUser && (

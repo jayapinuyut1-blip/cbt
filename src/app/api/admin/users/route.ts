@@ -302,8 +302,60 @@ export async function PATCH(request: Request) {
 
     const updates: Record<string, unknown> = {};
     if (body.nama !== undefined) updates.nama = String(body.nama).trim();
-    if (body.kelas_id !== undefined) updates.kelas_id = body.kelas_id || null;
+    if (body.kelas_id !== undefined) updates.kelas_id = body.kelas_id ? Number(body.kelas_id) : null;
     if (body.aktif !== undefined) updates.aktif = Boolean(body.aktif);
+    if (body.is_blocked !== undefined) {
+      updates.is_blocked = Boolean(body.is_blocked);
+      if (updates.is_blocked) updates.active_session_id = null;
+    }
+
+    // Jika NIS / username atau kata sandi diubah, sinkronkan ke Supabase Auth
+    const authUpdate: { email?: string; password?: string; email_confirm?: boolean } = {};
+    if (body.username !== undefined) {
+      const nextUsername = String(body.username).trim();
+      if (!nextUsername) {
+        return NextResponse.json(
+          { error: "NIS / Username tidak boleh kosong." },
+          { status: 400 }
+        );
+      }
+      const { data: currentProf } = await admin
+        .from("profiles")
+        .select("username")
+        .eq("id", id)
+        .single();
+      if (currentProf && currentProf.username !== nextUsername) {
+        updates.username = nextUsername;
+        authUpdate.email = usernameToEmail(nextUsername);
+        authUpdate.email_confirm = true;
+      }
+    }
+
+    if (body.new_password && String(body.new_password).trim().length > 0) {
+      const pwd = String(body.new_password).trim();
+      if (pwd.length < 6) {
+        return NextResponse.json(
+          { error: "Kata sandi baru minimal 6 karakter." },
+          { status: 400 }
+        );
+      }
+      authUpdate.password = pwd;
+      updates.kata_sandi_awal = pwd;
+      updates.wajib_ganti_sandi = false;
+    }
+
+    if (Object.keys(authUpdate).length > 0) {
+      const { error: authErr } = await admin.auth.admin.updateUserById(
+        id,
+        authUpdate
+      );
+      if (authErr) {
+        return NextResponse.json(
+          { error: `Gagal memperbarui akun login: ${authErr.message}` },
+          { status: 400 }
+        );
+      }
+    }
 
     const { error } = await admin.from("profiles").update(updates).eq("id", id);
     if (error) {
@@ -324,23 +376,45 @@ export async function DELETE(request: Request) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const id = searchParams.get("id");
-    if (!id) {
-      return NextResponse.json({ error: "ID pengguna wajib ada." }, { status: 400 });
+    const singleId = searchParams.get("id");
+    const admin = createAdminSupabase();
+
+    if (singleId) {
+      if (singleId === me.id) {
+        return NextResponse.json(
+          { error: "Tidak dapat menghapus akun sendiri." },
+          { status: 400 }
+        );
+      }
+      const { error } = await admin.auth.admin.deleteUser(singleId);
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      return NextResponse.json({ ok: true, deletedCount: 1 });
     }
-    if (id === me.id) {
+
+    // Hapus massal berdasarkan body { ids: string[] }
+    const body = await request.json().catch(() => ({}));
+    const ids: string[] = Array.isArray(body.ids)
+      ? body.ids
+          .map((x: unknown) => String(x))
+          .filter((x: string) => x && x !== me.id)
+      : [];
+
+    if (ids.length === 0) {
       return NextResponse.json(
-        { error: "Tidak dapat menghapus akun sendiri." },
+        { error: "Pilih minimal 1 pengguna untuk dihapus." },
         { status: 400 }
       );
     }
 
-    const admin = createAdminSupabase();
-    const { error } = await admin.auth.admin.deleteUser(id);
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    let deletedCount = 0;
+    for (const uid of ids) {
+      const { error } = await admin.auth.admin.deleteUser(uid);
+      if (!error) deletedCount++;
     }
-    return NextResponse.json({ ok: true });
+
+    return NextResponse.json({ ok: true, deletedCount });
   } catch (err) {
     console.error("Admin users DELETE error:", err);
     return NextResponse.json({ error: "Gagal menghapus pengguna." }, { status: 500 });
