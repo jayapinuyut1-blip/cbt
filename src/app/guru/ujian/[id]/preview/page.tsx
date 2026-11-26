@@ -63,7 +63,7 @@ export default function GuruExamPreviewPage() {
   }
 
   return (
-    <div className="-m-4 md:-m-6">
+    <div className="-m-3.5 sm:-m-5 md:-m-6">
       <ExamWorkspace
         mode="preview"
         session={payload}

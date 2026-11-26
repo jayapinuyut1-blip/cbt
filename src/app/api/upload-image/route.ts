@@ -26,6 +26,12 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get("file");
     const folderRaw = String(formData.get("folder") || "questions");
+    if (folderRaw === "school" && profile.role !== "admin") {
+      return NextResponse.json(
+        { error: "Hanya Admin yang dapat mengunggah logo sekolah." },
+        { status: 403 }
+      );
+    }
     const folder = folderRaw === "school" ? "school" : "questions";
 
     if (!(file instanceof File)) {
@@ -157,6 +163,12 @@ export async function DELETE(request: Request) {
     const idx = url.indexOf(marker);
     if (idx !== -1) {
       const storagePath = decodeURIComponent(url.slice(idx + marker.length));
+      if (storagePath.startsWith("school/") && profile.role !== "admin") {
+        return NextResponse.json({ error: "Akses ditolak." }, { status: 403 });
+      }
+      if (!storagePath.startsWith("questions/") && !storagePath.startsWith("school/")) {
+        return NextResponse.json({ error: "Path berkas tidak valid." }, { status: 400 });
+      }
       const admin = createAdminSupabase();
       await admin.storage.from("cbt-assets").remove([storagePath]);
       return NextResponse.json({ ok: true, deleted: "supabase" });
@@ -167,6 +179,11 @@ export async function DELETE(request: Request) {
       const match = url.match(/\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z0-9]+$/);
       if (match?.[1]) {
         const publicId = match[1];
+        const allowedPrefix =
+          profile.role === "admin" ? "cbt-smkn3/" : "cbt-smkn3/questions/";
+        if (!publicId.startsWith(allowedPrefix)) {
+          return NextResponse.json({ error: "Akses ditolak." }, { status: 403 });
+        }
         const cloudName = process.env.CLOUDINARY_CLOUD_NAME!;
         const apiKey = process.env.CLOUDINARY_API_KEY!;
         const apiSecret = process.env.CLOUDINARY_API_SECRET!;

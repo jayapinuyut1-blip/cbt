@@ -169,8 +169,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // Verifikasi akses mapel guru
-    if (profile.role === "guru" && subjectId) {
+    // Verifikasi akses mapel guru (wajib menyertakan subjectId yang diampu)
+    if (profile.role === "guru") {
+      if (!subjectId) {
+        return NextResponse.json(
+          { error: "Mata pelajaran wajib dipilih sebelum generate soal AI." },
+          { status: 400 }
+        );
+      }
       const supabase = await createServerSupabase();
       const { data: link } = await supabase
         .from("teacher_subjects")
