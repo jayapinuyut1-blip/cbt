@@ -7,6 +7,7 @@ import {
   clearLoginRateLimit,
   recordLoginFailure,
 } from "@/lib/rate-limit";
+import { shouldBlockConcurrentStudentLogin } from "@/lib/session-guard";
 
 export async function POST(request: NextRequest) {
   try {
@@ -84,24 +85,61 @@ export async function POST(request: NextRequest) {
 
     const existingCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
 
-    // Penegakan 1 sesi aktif untuk siswa
+    // Smart Session Lock untuk siswa:
+    // Blokir login ganda (409) hanya saat siswa sedang mengerjakan ujian aktif yang belum habis waktunya.
+    // Jika sudah selesai ujian / lupa klik Keluar kemarin / ganti hari, izinkan otomatis dengan sesi baru.
     if (
       profile.role === "siswa" &&
       profile.active_session_id &&
       profile.active_session_id !== existingCookie
     ) {
-      await supabase.auth.signOut();
-      return NextResponse.json(
-        {
-          error:
-            "Akun siswa sedang aktif di perangkat lain. Minta Admin/Pengawas untuk klik 'Reset Login'.",
-        },
-        { status: 409 }
-      );
+      const { data: activeAttemptRow } = await admin
+        .from("attempts")
+        .select("mulai, tambahan_waktu, exams(durasi)")
+        .eq("siswa_id", profile.id)
+        .eq("status", "sedang_mengerjakan")
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const examRef = activeAttemptRow?.exams as
+        | { durasi?: number }
+        | Array<{ durasi?: number }>
+        | null
+        | undefined;
+      const durasiMenit = Array.isArray(examRef)
+        ? Number(examRef[0]?.durasi || 0)
+        : Number(examRef?.durasi || 0);
+
+      const blocked = shouldBlockConcurrentStudentLogin({
+        role: profile.role,
+        activeSessionId: profile.active_session_id,
+        existingCookie,
+        activeAttempt: activeAttemptRow
+          ? {
+              mulai: activeAttemptRow.mulai,
+              durasiMenit,
+              tambahanWaktuMenit: activeAttemptRow.tambahan_waktu,
+            }
+          : null,
+      });
+
+      if (blocked) {
+        await supabase.auth.signOut();
+        return NextResponse.json(
+          {
+            error:
+              "Akun siswa sedang mengerjakan ujian di perangkat lain. Minta Admin/Pengawas untuk klik 'Reset Login'.",
+          },
+          { status: 409 }
+        );
+      }
     }
 
     const sessionId =
-      profile.role === "siswa" && profile.active_session_id
+      profile.role === "siswa" &&
+      profile.active_session_id &&
+      profile.active_session_id === existingCookie
         ? profile.active_session_id
         : crypto.randomUUID();
 
