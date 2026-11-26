@@ -187,6 +187,24 @@ insert into public.academic_years (nama, aktif)
 values ('2026/2027', true)
 on conflict (nama) do nothing;
 
+insert into public.subjects (nama) values
+  ('Pendidikan Agama'),
+  ('Sejarah'),
+  ('Matematika'),
+  ('PKn'),
+  ('PJOK'),
+  ('Seni Budaya'),
+  ('Bahasa Inggris'),
+  ('Informatika'),
+  ('KKA'),
+  ('Projek IPAS'),
+  ('Bahasa Indonesia'),
+  ('Dasar-Dasar Geologi Pertambangan'),
+  ('Dasar-Dasar Agribisnis Tanaman'),
+  ('Dasar-Dasar Teknik Jaringan Telekomunikasi'),
+  ('Dasar-Dasar Pemasaran')
+on conflict (nama) do nothing;
+
 -- ============================================================================
 -- 3. FUNGSI BANTU ROLE (SECURITY DEFINER agar tidak memicu rekursi RLS)
 -- ============================================================================
