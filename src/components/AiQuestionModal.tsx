@@ -127,12 +127,12 @@ export default function AiQuestionModal({
   const [grade, setGrade] = useState<GradeOption>("X");
   const [selectedCpIds, setSelectedCpIds] = useState<string[]>([]);
   const [topic, setTopic] = useState("");
+  const [showCustomTopic, setShowCustomTopic] = useState(false);
   const [difficulty, setDifficulty] = useState("Sedang (Campuran C2-C4)");
   const [countPg, setCountPg] = useState(5);
   const [countIsian, setCountIsian] = useState(2);
   const [countJodoh, setCountJodoh] = useState(1);
   const [countEssay, setCountEssay] = useState(1);
-  const [customApiKey, setCustomApiKey] = useState("");
 
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
@@ -256,7 +256,6 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           countIsian,
           countJodoh,
           countEssay,
-          apiKey: customApiKey,
         }),
       });
       const data = await res.json();
@@ -573,38 +572,51 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           </div>
         </div>
 
-        {/* Topik Tambahan / Catatan Khusus (Opsional bila CP sudah dipilih) */}
-        <div>
-          <label className="block text-xs font-medium text-slate-700 mb-1">
-            Fokus Topik / Materi Tambahan{" "}
-            <span className="text-slate-400 font-normal">
-              ({selectedCps.length > 0 ? "Opsional — CP sudah dipilih di atas" : "Wajib jika tidak memilih CP"})
-            </span>
-          </label>
-          <textarea
-            rows={3}
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            placeholder="Contoh: Fokus pada studi kasus praktik bengkel/lapangan, atau tempel ringkasan materi Anda di sini..."
-            className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-          />
-        </div>
+        {/* Catatan / Materi Tambahan (Toggle Opsional jika CP tersedia) */}
+        {availableCps.length === 0 || showCustomTopic ? (
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-slate-700">
+                Catatan / Materi Khusus{" "}
+                <span className="text-slate-400 font-normal">
+                  ({availableCps.length > 0 ? "Opsional" : "Wajib"})
+                </span>
+              </label>
+              {availableCps.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCustomTopic(false);
+                    setTopic("");
+                  }}
+                  className="text-xs text-slate-500 hover:text-slate-800 cursor-pointer"
+                >
+                  Sembunyikan
+                </button>
+              )}
+            </div>
+            <textarea
+              rows={3}
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="Contoh: Fokus pada studi kasus praktik lapangan, atau tempel ringkasan bab tertentu..."
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+            />
+          </div>
+        ) : (
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowCustomTopic(true)}
+              className="text-xs text-purple-700 hover:underline font-medium cursor-pointer"
+            >
+              + Tambah Catatan / Materi Khusus (Opsional)
+            </button>
+          </div>
+        )}
 
         {mode === "auto" ? (
-          <form onSubmit={handleAutoGenerate} className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">
-                Gemini API Key (Opsional — sudah otomatis menggunakan key server)
-              </label>
-              <input
-                type="password"
-                value={customApiKey}
-                onChange={(e) => setCustomApiKey(e.target.value)}
-                placeholder="Biarkan kosong untuk memakai key bawaan server"
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
-              />
-            </div>
-
+          <form onSubmit={handleAutoGenerate}>
             <button
               type="submit"
               disabled={generating || (selectedCps.length === 0 && !topic.trim())}
