@@ -33,16 +33,26 @@ export default function AdminPengaturanPage() {
     setUploading(true);
     try {
       const compressed = await compressImageFile(file, 400, 0.85);
-      const ext = file.type === "image/png" ? "png" : "jpg";
-      const path = `school/logo-${Date.now()}.${ext}`;
-      const { error } = await supabase.storage
-        .from("cbt-assets")
-        .upload(path, compressed, { upsert: true, contentType: compressed.type });
-      if (error) {
-        alert("Gagal upload logo: " + error.message);
+      const fd = new FormData();
+      fd.append("file", compressed);
+      fd.append("folder", "school");
+
+      const res = await fetch("/api/upload-image", {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert("Gagal upload logo: " + (data.error || "Kesalahan server"));
       } else {
-        const { data } = supabase.storage.from("cbt-assets").getPublicUrl(path);
-        setLogo(data.publicUrl);
+        if (logo && logo !== data.url) {
+          fetch("/api/upload-image", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: logo }),
+          }).catch(() => {});
+        }
+        setLogo(data.url);
       }
     } finally {
       setUploading(false);

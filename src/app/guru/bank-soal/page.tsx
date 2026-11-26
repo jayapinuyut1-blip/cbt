@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
-import { compressImageFile } from "@/lib/image";
+import { compressImageFile, normalizeExternalImageUrl } from "@/lib/image";
 import { questionTypeLabel } from "@/lib/format";
 import { fetchAllowedSubjectsForCurrentUser } from "@/lib/teacher-subjects";
 import AiQuestionModal from "@/components/AiQuestionModal";
@@ -48,6 +48,7 @@ export default function GuruBankSoalPage() {
   const [teks, setTeks] = useState("");
   const [bobot, setBobot] = useState("1");
   const [gambar, setGambar] = useState("");
+  const [uploadMeta, setUploadMeta] = useState("");
   const [options, setOptions] = useState<DraftOption[]>(DEFAULT_PG_OPTIONS());
   const [uploadingImg, setUploadingImg] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -95,6 +96,7 @@ export default function GuruBankSoalPage() {
     setTeks("");
     setBobot("1");
     setGambar("");
+    setUploadMeta("");
     setOptions(DEFAULT_PG_OPTIONS());
     setShowModal(true);
   }
@@ -105,6 +107,7 @@ export default function GuruBankSoalPage() {
     setTeks(q.teks);
     setBobot(String(q.bobot));
     setGambar(q.gambar || "");
+    setUploadMeta("");
     if (q.tipe === "pg") {
       const existing = (q.question_options || []).map((o) => ({
         teks: o.teks,
@@ -160,23 +163,51 @@ export default function GuruBankSoalPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadingImg(true);
+    setUploadMeta("");
     try {
-      const compressed = await compressImageFile(file, 1200, 0.8);
-      const ext = file.type === "image/png" ? "png" : "jpg";
-      const path = `questions/q-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 7)}.${ext}`;
-      const { error } = await supabase.storage
-        .from("cbt-assets")
-        .upload(path, compressed, { contentType: compressed.type });
-      if (error) alert("Gagal upload gambar: " + error.message);
-      else {
-        const { data } = supabase.storage.from("cbt-assets").getPublicUrl(path);
-        setGambar(data.publicUrl);
+      const compressed = await compressImageFile(file, 900, 0.78);
+      const fd = new FormData();
+      fd.append("file", compressed);
+      fd.append("folder", "questions");
+
+      const res = await fetch("/api/upload-image", {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert("Gagal upload gambar: " + (data.error || "Kesalahan server"));
+      } else {
+        // Hapus gambar lama di storage jika sedang mengganti gambar
+        if (gambar && gambar !== data.url) {
+          fetch("/api/upload-image", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: gambar }),
+          }).catch(() => {});
+        }
+        setGambar(data.url);
+        const kb = Math.max(1, Math.round((data.bytes || compressed.size) / 1024));
+        const prov =
+          data.provider === "cloudinary" ? "Cloudinary CDN" : "Supabase Storage";
+        setUploadMeta(`Terkompres WebP (${kb} KB) • ${prov}`);
       }
     } finally {
       setUploadingImg(false);
+      e.target.value = "";
     }
+  }
+
+  function handleRemoveImage() {
+    if (gambar) {
+      fetch("/api/upload-image", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: gambar }),
+      }).catch(() => {});
+    }
+    setGambar("");
+    setUploadMeta("");
   }
 
   async function handleSaveQuestion(e: React.FormEvent) {
@@ -286,7 +317,15 @@ export default function GuruBankSoalPage() {
 
   async function deleteQuestion(id: number) {
     if (!confirm("Hapus soal ini dari bank soal?")) return;
+    const target = questions.find((q) => q.id === id);
     await supabase.from("questions").delete().eq("id", id);
+    if (target?.gambar) {
+      fetch("/api/upload-image", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: target.gambar }),
+      }).catch(() => {});
+    }
     loadQuestions();
   }
 
@@ -801,15 +840,15 @@ export default function GuruBankSoalPage() {
                 />
               </div>
 
-              {/* Gambar Opsional (1 gambar per soal) */}
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Gambar Soal (Opsional, maks 1 gambar)
+              {/* Gambar Opsional (1 gambar per soal — otomatis kompres WebP + opsi URL/Drive) */}
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-slate-700">
+                  Gambar Soal (Opsional, maks 1 gambar — otomatis dikompres WebP hemat kuota)
                 </label>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
                   <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-medium cursor-pointer">
                     <ImageIcon className="w-4 h-4" />
-                    <span>{uploadingImg ? "Mengunggah..." : "Pilih Gambar"}</span>
+                    <span>{uploadingImg ? "Mengompres & Mengunggah..." : "Unggah Gambar"}</span>
                     <input
                       type="file"
                       accept="image/png,image/jpeg,image/webp"
@@ -818,21 +857,36 @@ export default function GuruBankSoalPage() {
                       disabled={uploadingImg}
                     />
                   </label>
+                  <input
+                    type="url"
+                    value={gambar}
+                    onChange={(e) => {
+                      setGambar(normalizeExternalImageUrl(e.target.value));
+                      setUploadMeta("");
+                    }}
+                    placeholder="Atau tempel URL gambar / link share Google Drive..."
+                    className="flex-1 min-w-52 px-3 py-1.5 rounded-lg border border-slate-300 text-xs"
+                  />
                   {gambar && (
                     <button
                       type="button"
-                      onClick={() => setGambar("")}
+                      onClick={handleRemoveImage}
                       className="text-xs text-red-600 hover:underline cursor-pointer"
                     >
-                      Hapus Gambar
+                      Hapus
                     </button>
                   )}
                 </div>
+                {uploadMeta && (
+                  <div className="text-[11px] text-emerald-700 font-medium">
+                    {uploadMeta}
+                  </div>
+                )}
                 {gambar && (
                   <img
                     src={gambar}
                     alt="Preview"
-                    className="mt-2 max-h-40 rounded-lg border border-slate-200"
+                    className="mt-1 max-h-40 rounded-lg border border-slate-200"
                   />
                 )}
               </div>
