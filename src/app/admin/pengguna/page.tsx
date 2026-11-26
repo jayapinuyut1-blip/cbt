@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
@@ -22,12 +23,20 @@ import {
   Trash2,
   RefreshCw,
   BookOpen,
+  ArrowUpCircle,
+  FileText,
+  Users,
+  Search,
 } from "lucide-react";
 
 export default function AdminPenggunaPage() {
   const supabase = createClient();
   const [roleFilter, setRoleFilter] = useState<UserRole>("siswa");
   const [kelasFilter, setKelasFilter] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [bulkTargetClassId, setBulkTargetClassId] = useState<string>("");
+  const [bulkProcessing, setBulkProcessing] = useState(false);
   const [users, setUsers] = useState<Profile[]>([]);
   const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -104,10 +113,127 @@ export default function AdminPenggunaPage() {
 
   const filteredUsers = users.filter((u) => {
     if (roleFilter === "siswa" && kelasFilter) {
-      return String(u.kelas_id || "") === kelasFilter;
+      if (kelasFilter === "__none__") {
+        if (u.kelas_id !== null) return false;
+      } else if (String(u.kelas_id || "") !== kelasFilter) {
+        return false;
+      }
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      if (
+        !u.nama.toLowerCase().includes(q) &&
+        !u.username.toLowerCase().includes(q)
+      ) {
+        return false;
+      }
     }
     return true;
   });
+
+  function toggleStudentSelect(id: string) {
+    setSelectedStudentIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
+  function toggleSelectAllStudents() {
+    const visibleIds = filteredUsers.map((u) => u.id);
+    const allChecked =
+      visibleIds.length > 0 &&
+      visibleIds.every((id) => selectedStudentIds.includes(id));
+    if (allChecked) {
+      setSelectedStudentIds((prev) =>
+        prev.filter((id) => !visibleIds.includes(id))
+      );
+    } else {
+      setSelectedStudentIds((prev) =>
+        Array.from(new Set([...prev, ...visibleIds]))
+      );
+    }
+  }
+
+  async function handleBulkAssignClass() {
+    if (selectedStudentIds.length === 0) {
+      alert("Centang minimal 1 siswa terlebih dahulu.");
+      return;
+    }
+    if (!bulkTargetClassId) {
+      alert("Pilih kelas / jurusan tujuan terlebih dahulu.");
+      return;
+    }
+    const targetName =
+      classes.find((c) => String(c.id) === bulkTargetClassId)?.nama || "";
+    if (
+      !confirm(
+        `Pasangkan ${selectedStudentIds.length} siswa terpilih ke kelas/jurusan "${targetName}"?`
+      )
+    ) {
+      return;
+    }
+    setBulkProcessing(true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "bulk_assign_class",
+          student_ids: selectedStudentIds,
+          kelas_id: Number(bulkTargetClassId),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) alert(data.error || "Gagal memasangkan kelas/jurusan.");
+      else {
+        alert(
+          `Berhasil memasangkan ${data.updatedCount} siswa ke "${targetName}".`
+        );
+        setSelectedStudentIds([]);
+        loadData();
+      }
+    } finally {
+      setBulkProcessing(false);
+    }
+  }
+
+  async function handleBulkPromoteSmart() {
+    if (selectedStudentIds.length === 0) {
+      alert("Centang siswa yang ingin dinaikkan kelasnya terlebih dahulu.");
+      return;
+    }
+    if (
+      !confirm(
+        `Proses naik kelas otomatis untuk ${selectedStudentIds.length} siswa terpilih?\n\n• Kelas X → XI (jurusan sama)\n• Kelas XI → XII (jurusan sama)\n• Kelas XII → Lulus (akun dinonaktifkan, arsip nilai & raport tetap tersimpan)`
+      )
+    ) {
+      return;
+    }
+    setBulkProcessing(true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "bulk_promote_smart",
+          student_ids: selectedStudentIds,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) alert(data.error || "Gagal memproses naik kelas.");
+      else {
+        alert(
+          `Selesai! ${data.promotedCount} siswa naik kelas, ${data.graduatedCount} siswa diluluskan/diarsipkan` +
+            (data.unmatchedCount > 0
+              ? `, ${data.unmatchedCount} belum punya kelas tujuan yang cocok.`
+              : ".")
+        );
+        setSelectedStudentIds([]);
+        loadData();
+      }
+    } finally {
+      setBulkProcessing(false);
+    }
+  }
 
   async function handleAddUser(e: React.FormEvent) {
     e.preventDefault();
@@ -433,6 +559,7 @@ export default function AdminPenggunaPage() {
               onClick={() => {
                 setRoleFilter(r);
                 setKelasFilter("");
+                setSelectedStudentIds([]);
               }}
               className={`px-4 py-2 rounded-lg text-sm font-medium capitalize cursor-pointer ${
                 roleFilter === r
@@ -445,20 +572,36 @@ export default function AdminPenggunaPage() {
           ))}
         </div>
 
-        {roleFilter === "siswa" && (
-          <select
-            value={kelasFilter}
-            onChange={(e) => setKelasFilter(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm"
-          >
-            <option value="">Semua Kelas</option>
-            {classes.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nama}
-              </option>
-            ))}
-          </select>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari nama / NIS..."
+              className="pl-9 pr-3 py-2 rounded-lg border border-slate-300 bg-white text-sm w-48"
+            />
+          </div>
+          {roleFilter === "siswa" && (
+            <select
+              value={kelasFilter}
+              onChange={(e) => {
+                setKelasFilter(e.target.value);
+                setSelectedStudentIds([]);
+              }}
+              className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm"
+            >
+              <option value="">Semua Kelas / Jurusan</option>
+              <option value="__none__">Belum Punya Kelas / Jurusan</option>
+              {classes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nama}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {/* Form Tambah Satuan + Impor Excel */}
@@ -550,11 +693,76 @@ export default function AdminPenggunaPage() {
         )}
       </div>
 
+      {/* Panel Aksi Massal Siswa: Pasangkan ke Jurusan/Kelas & Naik Kelas Otomatis */}
+      {roleFilter === "siswa" && (
+        <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-indigo-950">
+            <Users className="w-4 h-4 text-indigo-600 shrink-0" />
+            <span>
+              <strong>{selectedStudentIds.length}</strong> siswa dipilih{" "}
+              <span className="text-xs text-indigo-700">
+                (centang kotak di tabel bawah untuk pasangkan ke jurusan atau naik kelas massal)
+              </span>
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={bulkTargetClassId}
+              onChange={(e) => setBulkTargetClassId(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-indigo-300 bg-white text-xs sm:text-sm"
+            >
+              <option value="">-- Pilih Kelas / Jurusan Tujuan --</option>
+              {classes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nama}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              disabled={bulkProcessing || selectedStudentIds.length === 0 || !bulkTargetClassId}
+              onClick={handleBulkAssignClass}
+              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-xs sm:text-sm font-semibold cursor-pointer"
+            >
+              Pasangkan ke Jurusan
+            </button>
+
+            <button
+              type="button"
+              disabled={bulkProcessing || selectedStudentIds.length === 0}
+              onClick={handleBulkPromoteSmart}
+              title="Otomatis naikkan X→XI, XI→XII pada jurusan sama, dan XII→Lulus"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-300 text-white rounded-lg text-xs sm:text-sm font-semibold cursor-pointer"
+            >
+              <ArrowUpCircle className="w-4 h-4" />
+              Naik Kelas Otomatis
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Tabel Pengguna */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
+              {roleFilter === "siswa" && (
+                <th className="px-3 py-3 w-10 text-center">
+                  <input
+                    type="checkbox"
+                    checked={
+                      filteredUsers.length > 0 &&
+                      filteredUsers.every((u) =>
+                        selectedStudentIds.includes(u.id)
+                      )
+                    }
+                    onChange={toggleSelectAllStudents}
+                    title="Pilih Semua Siswa yang Tampil"
+                  />
+                </th>
+              )}
               <th className="text-left px-4 py-3">
                 {roleFilter === "siswa" ? "NIS" : "Username"}
               </th>
@@ -572,7 +780,21 @@ export default function AdminPenggunaPage() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filteredUsers.map((u) => (
-              <tr key={u.id} className={!u.aktif ? "opacity-50" : ""}>
+              <tr
+                key={u.id}
+                className={`${!u.aktif ? "opacity-50" : ""} ${
+                  selectedStudentIds.includes(u.id) ? "bg-indigo-50/40" : ""
+                }`}
+              >
+                {roleFilter === "siswa" && (
+                  <td className="px-3 py-2.5 text-center">
+                    <input
+                      type="checkbox"
+                      checked={selectedStudentIds.includes(u.id)}
+                      onChange={() => toggleStudentSelect(u.id)}
+                    />
+                  </td>
+                )}
                 <td className="px-4 py-2.5 font-mono text-xs font-semibold">
                   {u.username}
                 </td>
@@ -637,6 +859,15 @@ export default function AdminPenggunaPage() {
                 </td>
                 <td className="px-4 py-2.5">
                   <div className="flex items-center justify-end gap-1">
+                    {roleFilter === "siswa" && (
+                      <Link
+                        href={`/admin/raport/${u.id}`}
+                        title="Lihat & Cetak Raport Sementara Siswa"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-xs font-medium"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> Raport
+                      </Link>
+                    )}
                     {roleFilter === "guru" && (
                       <button
                         onClick={() => openMapelModal(u)}

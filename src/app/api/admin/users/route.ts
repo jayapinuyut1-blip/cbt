@@ -111,13 +111,125 @@ export async function PATCH(request: Request) {
 
   try {
     const body = await request.json();
-    const id = String(body.id || "");
     const action = String(body.action || "update");
+    const admin = createAdminSupabase();
+
+    // Aksi Massal: Pasangkan banyak siswa ke kelas / jurusan
+    if (action === "bulk_assign_class") {
+      const studentIds: string[] = Array.isArray(body.student_ids)
+        ? body.student_ids.map((x: unknown) => String(x)).filter(Boolean)
+        : [];
+      const kelasId = body.kelas_id ? Number(body.kelas_id) : null;
+      if (studentIds.length === 0) {
+        return NextResponse.json(
+          { error: "Pilih minimal 1 siswa terlebih dahulu." },
+          { status: 400 }
+        );
+      }
+
+      const { error: upErr } = await admin
+        .from("profiles")
+        .update({ kelas_id: kelasId, aktif: true })
+        .eq("role", "siswa")
+        .in("id", studentIds);
+
+      if (upErr) {
+        return NextResponse.json({ error: upErr.message }, { status: 400 });
+      }
+      return NextResponse.json({ ok: true, updatedCount: studentIds.length });
+    }
+
+    // Aksi Massal: Naik Kelas Otomatis berdasarkan pola kelas SMKN 3 (X -> XI -> XII -> Lulus)
+    if (action === "bulk_promote_smart") {
+      const studentIds: string[] = Array.isArray(body.student_ids)
+        ? body.student_ids.map((x: unknown) => String(x)).filter(Boolean)
+        : [];
+      if (studentIds.length === 0) {
+        return NextResponse.json(
+          { error: "Pilih minimal 1 siswa untuk naik kelas." },
+          { status: 400 }
+        );
+      }
+
+      const [{ data: allClasses }, { data: targetStudents }] = await Promise.all([
+        admin.from("classes").select("id, nama"),
+        admin
+          .from("profiles")
+          .select("id, kelas_id")
+          .eq("role", "siswa")
+          .in("id", studentIds),
+      ]);
+
+      const classById = new Map<number, string>(
+        (allClasses || []).map((c) => [c.id, c.nama.trim()])
+      );
+      const classByNormName = new Map<string, number>(
+        (allClasses || []).map((c) => [c.nama.trim().toLowerCase(), c.id])
+      );
+
+      let promotedCount = 0;
+      let graduatedCount = 0;
+      let unmatchedCount = 0;
+
+      for (const st of targetStudents || []) {
+        if (!st.kelas_id) {
+          unmatchedCount++;
+          continue;
+        }
+        const currName = classById.get(st.kelas_id) || "";
+        const upper = currName.toUpperCase();
+
+        if (upper.startsWith("XII ") || upper.startsWith("XII.")) {
+          await admin
+            .from("profiles")
+            .update({ aktif: false, active_session_id: null })
+            .eq("id", st.id);
+          graduatedCount++;
+        } else if (upper.startsWith("XI ") || upper.startsWith("XI.")) {
+          const rest = currName.slice(2).trim();
+          const nextId =
+            classByNormName.get(`xii ${rest}`.toLowerCase()) ||
+            classByNormName.get(`xii.${rest}`.toLowerCase());
+          if (nextId) {
+            await admin
+              .from("profiles")
+              .update({ kelas_id: nextId })
+              .eq("id", st.id);
+            promotedCount++;
+          } else {
+            unmatchedCount++;
+          }
+        } else if (upper.startsWith("X ") || upper.startsWith("X.")) {
+          const rest = currName.slice(1).trim();
+          const nextId =
+            classByNormName.get(`xi ${rest}`.toLowerCase()) ||
+            classByNormName.get(`xi.${rest}`.toLowerCase());
+          if (nextId) {
+            await admin
+              .from("profiles")
+              .update({ kelas_id: nextId })
+              .eq("id", st.id);
+            promotedCount++;
+          } else {
+            unmatchedCount++;
+          }
+        } else {
+          unmatchedCount++;
+        }
+      }
+
+      return NextResponse.json({
+        ok: true,
+        promotedCount,
+        graduatedCount,
+        unmatchedCount,
+      });
+    }
+
+    const id = String(body.id || "");
     if (!id) {
       return NextResponse.json({ error: "ID pengguna wajib ada." }, { status: 400 });
     }
-
-    const admin = createAdminSupabase();
 
     if (action === "reset_password") {
       const newPassword =
