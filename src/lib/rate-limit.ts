@@ -3,6 +3,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const LOGIN_MAX_ATTEMPTS = 8;
 export const LOGIN_WINDOW_MS = 5 * 60 * 1000; // 5 menit
 
+export const AI_MAX_BATCHES_PER_WINDOW = 30;
+export const AI_WINDOW_MS = 10 * 60 * 1000; // 10 menit
+
 export interface RateLimitEntry {
   attempts: number;
   windowExpiresAt: number; // epoch ms
@@ -22,7 +25,7 @@ export function isRateLimitAllowed(
   return entry.attempts < maxAttempts;
 }
 
-/** Logika murni: hitung state baru saat percobaan login gagal. */
+/** Logika murni: hitung state baru saat hit/percobaan tercatat. */
 export function computeNextFailureEntry(
   entry: RateLimitEntry | null,
   nowMs: number,
@@ -37,9 +40,11 @@ export function computeNextFailureEntry(
   };
 }
 
-export async function checkLoginRateLimit(
+/** Cek generic rate-limit berbasis tabel PostgreSQL `login_rate_limits` (serverless-safe). */
+export async function checkDbRateLimit(
   admin: SupabaseClient,
   rateKey: string,
+  maxAttempts: number,
   nowMs = Date.now()
 ): Promise<boolean> {
   try {
@@ -50,8 +55,11 @@ export async function checkLoginRateLimit(
       .maybeSingle();
 
     if (error) {
-      // Fallback mulus bila tabel belum dipatch
-      return isRateLimitAllowed(memoryFallback.get(rateKey) || null, nowMs);
+      return isRateLimitAllowed(
+        memoryFallback.get(rateKey) || null,
+        nowMs,
+        maxAttempts
+      );
     }
 
     if (!data) return true;
@@ -59,15 +67,21 @@ export async function checkLoginRateLimit(
       attempts: Number(data.attempts || 0),
       windowExpiresAt: new Date(data.window_expires_at).getTime(),
     };
-    return isRateLimitAllowed(entry, nowMs);
+    return isRateLimitAllowed(entry, nowMs, maxAttempts);
   } catch {
-    return isRateLimitAllowed(memoryFallback.get(rateKey) || null, nowMs);
+    return isRateLimitAllowed(
+      memoryFallback.get(rateKey) || null,
+      nowMs,
+      maxAttempts
+    );
   }
 }
 
-export async function recordLoginFailure(
+/** Catat 1 hit/percobaan ke tabel `login_rate_limits` dengan jendela waktu fleksibel. */
+export async function recordDbRateLimitHit(
   admin: SupabaseClient,
   rateKey: string,
+  windowMs: number,
   nowMs = Date.now()
 ): Promise<void> {
   try {
@@ -80,7 +94,8 @@ export async function recordLoginFailure(
     if (error) {
       const next = computeNextFailureEntry(
         memoryFallback.get(rateKey) || null,
-        nowMs
+        nowMs,
+        windowMs
       );
       memoryFallback.set(rateKey, next);
       return;
@@ -93,7 +108,7 @@ export async function recordLoginFailure(
         }
       : null;
 
-    const next = computeNextFailureEntry(current, nowMs);
+    const next = computeNextFailureEntry(current, nowMs, windowMs);
     await admin.from("login_rate_limits").upsert({
       rate_key: rateKey,
       attempts: next.attempts,
@@ -110,10 +125,27 @@ export async function recordLoginFailure(
   } catch {
     const next = computeNextFailureEntry(
       memoryFallback.get(rateKey) || null,
-      nowMs
+      nowMs,
+      windowMs
     );
     memoryFallback.set(rateKey, next);
   }
+}
+
+export async function checkLoginRateLimit(
+  admin: SupabaseClient,
+  rateKey: string,
+  nowMs = Date.now()
+): Promise<boolean> {
+  return checkDbRateLimit(admin, rateKey, LOGIN_MAX_ATTEMPTS, nowMs);
+}
+
+export async function recordLoginFailure(
+  admin: SupabaseClient,
+  rateKey: string,
+  nowMs = Date.now()
+): Promise<void> {
+  return recordDbRateLimitHit(admin, rateKey, LOGIN_WINDOW_MS, nowMs);
 }
 
 export async function clearLoginRateLimit(
@@ -126,4 +158,25 @@ export async function clearLoginRateLimit(
   } catch {
     // Abaikan bila tabel belum tersedia
   }
+}
+
+/**
+ * Rate-limit serverless-safe untuk endpoint AI Generator per guru/admin.
+ * Memakai ulang tabel `login_rate_limits` dengan prefix `ai:guru:{userId}` (tanpa tabel baru).
+ */
+export async function consumeAiRateLimit(
+  admin: SupabaseClient,
+  userId: string,
+  nowMs = Date.now()
+): Promise<boolean> {
+  const key = `ai:guru:${userId}`;
+  const allowed = await checkDbRateLimit(
+    admin,
+    key,
+    AI_MAX_BATCHES_PER_WINDOW,
+    nowMs
+  );
+  if (!allowed) return false;
+  await recordDbRateLimitHit(admin, key, AI_WINDOW_MS, nowMs);
+  return true;
 }

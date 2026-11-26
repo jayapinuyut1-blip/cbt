@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  AI_MAX_BATCHES_PER_WINDOW,
+  AI_WINDOW_MS,
   LOGIN_MAX_ATTEMPTS,
   LOGIN_WINDOW_MS,
   computeNextFailureEntry,
@@ -37,5 +39,21 @@ describe("rate-limit pure helpers", () => {
     const second = computeNextFailureEntry(first, now + 5000);
     expect(second.attempts).toBe(2);
     expect(second.windowExpiresAt).toBe(first.windowExpiresAt);
+  });
+
+  it("mendukung batas dan jendela waktu kustom untuk rate-limit AI", () => {
+    let entry = null;
+    for (let i = 0; i < AI_MAX_BATCHES_PER_WINDOW; i++) {
+      expect(
+        isRateLimitAllowed(entry, now + i * 1000, AI_MAX_BATCHES_PER_WINDOW)
+      ).toBe(true);
+      entry = computeNextFailureEntry(entry, now + i * 1000, AI_WINDOW_MS);
+    }
+    expect(
+      isRateLimitAllowed(entry, now + 60_000, AI_MAX_BATCHES_PER_WINDOW)
+    ).toBe(false);
+    expect(
+      isRateLimitAllowed(entry, now + AI_WINDOW_MS, AI_MAX_BATCHES_PER_WINDOW)
+    ).toBe(true);
   });
 });

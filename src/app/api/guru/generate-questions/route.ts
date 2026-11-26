@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { getCurrentUserProfile } from "@/lib/server-auth";
-import { createServerSupabase } from "@/lib/supabase/server";
+import {
+  createAdminSupabase,
+  createServerSupabase,
+} from "@/lib/supabase/server";
+import {
+  AI_MAX_BATCHES_PER_WINDOW,
+  consumeAiRateLimit,
+} from "@/lib/rate-limit";
 
 export const maxDuration = 60;
 
@@ -200,6 +207,18 @@ export async function POST(request: Request) {
             "GEMINI_API_KEY belum disetel di server (.env.local / Vercel). Gunakan tab 'Mode Prompt Gratis' atau hubungi Admin.",
         },
         { status: 400 }
+      );
+    }
+
+    // Rate-limit serverless-safe berbasis DB per guru/admin agar kuota API tetap aman di multi-instance Vercel
+    const admin = createAdminSupabase();
+    const allowed = await consumeAiRateLimit(admin, profile.id);
+    if (!allowed) {
+      return NextResponse.json(
+        {
+          error: `Batas pemakaian AI sementara tercapai (maks ${AI_MAX_BATCHES_PER_WINDOW} batch per 10 menit). Coba lagi beberapa menit lagi atau gunakan Mode Prompt Gratis.`,
+        },
+        { status: 429 }
       );
     }
 

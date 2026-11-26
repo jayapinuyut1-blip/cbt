@@ -3,12 +3,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
-import { questionTypeLabel } from "@/lib/format";
 import {
   GRADE_LABELS,
   getCapaianForSubject,
   type GradeOption,
 } from "@/lib/capaian-pembelajaran";
+import {
+  BATCH_SIZE,
+  MAX_PER_TYPE,
+  buildBatches,
+  buildCopyablePrompt,
+  buildExcelWorkbookFromGenerated,
+  clampQuestionCount,
+  parsePastedAiJson,
+  type BatchQueueItem,
+} from "@/lib/ai-question-utils";
+import AiQuestionPreview from "@/components/guru/AiQuestionPreview";
 import type { Subject } from "@/types/cbt";
 import type { GeneratedQuestion } from "@/app/api/guru/generate-questions/route";
 import {
@@ -16,9 +26,6 @@ import {
   X,
   Copy,
   Check,
-  Download,
-  Save,
-  Trash2,
   Loader2,
   ClipboardPaste,
   BookOpenCheck,
@@ -29,166 +36,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 
-const BATCH_SIZE = 10; // Maks 10 soal per gelombang antrian agar cepat & tidak timeout Vercel
-const MAX_PER_TYPE = 50; // Maks 50 per tipe soal
-
-interface BatchQueueItem {
-  id: number;
-  label: string;
-  countPg: number;
-  countIsian: number;
-  countJodoh: number;
-  countEssay: number;
-  total: number;
-  status: "queued" | "running" | "done" | "error" | "cancelled";
-  generatedCount?: number;
-  errorMsg?: string;
-}
-
-function buildBatches(
-  pg: number,
-  isian: number,
-  jodoh: number,
-  essay: number
-): BatchQueueItem[] {
-  const batches: BatchQueueItem[] = [];
-  let idCounter = 1;
-
-  const addTypeBatches = (
-    typeKey: "pg" | "isian" | "jodoh" | "essay",
-    typeLabel: string,
-    total: number
-  ) => {
-    let remaining = total;
-    while (remaining > 0) {
-      const take = Math.min(BATCH_SIZE, remaining);
-      batches.push({
-        id: idCounter++,
-        label: `${take} ${typeLabel}`,
-        countPg: typeKey === "pg" ? take : 0,
-        countIsian: typeKey === "isian" ? take : 0,
-        countJodoh: typeKey === "jodoh" ? take : 0,
-        countEssay: typeKey === "essay" ? take : 0,
-        total: take,
-        status: "queued",
-      });
-      remaining -= take;
-    }
-  };
-
-  // Jika total semua tipe <= BATCH_SIZE, gabungkan jadi 1 batch super cepat!
-  const grandTotal = pg + isian + jodoh + essay;
-  if (grandTotal > 0 && grandTotal <= BATCH_SIZE) {
-    const parts: string[] = [];
-    if (pg > 0) parts.push(`${pg} PG`);
-    if (isian > 0) parts.push(`${isian} Isian`);
-    if (jodoh > 0) parts.push(`${jodoh} Jodoh`);
-    if (essay > 0) parts.push(`${essay} Essay`);
-    return [
-      {
-        id: 1,
-        label: parts.join(", "),
-        countPg: pg,
-        countIsian: isian,
-        countJodoh: jodoh,
-        countEssay: essay,
-        total: grandTotal,
-        status: "queued",
-      },
-    ];
-  }
-
-  addTypeBatches("pg", "Pilihan Ganda", pg);
-  addTypeBatches("isian", "Isian Singkat", isian);
-  addTypeBatches("jodoh", "Menjodohkan", jodoh);
-  addTypeBatches("essay", "Essay", essay);
-
-  return batches;
-}
-
-export function buildExcelWorkbookFromGenerated(
-  items: GeneratedQuestion[],
-  sheetName = "Bank Soal"
-) {
-  const letters = ["A", "B", "C", "D", "E"];
-  const rows = items.map((q) => {
-    if (q.tipe === "pg") {
-      const opts = q.opsi_pg || [];
-      const kunciIdx = opts.findIndex((o) => o.benar);
-      return {
-        Tipe: "pg",
-        Pertanyaan: q.teks,
-        Bobot: q.bobot,
-        Opsi_A: opts[0]?.teks || "",
-        Opsi_B: opts[1]?.teks || "",
-        Opsi_C: opts[2]?.teks || "",
-        Opsi_D: opts[3]?.teks || "",
-        Opsi_E: opts[4]?.teks || "",
-        Kunci: kunciIdx >= 0 ? letters[kunciIdx] : "A",
-        Pasangan: "",
-      };
-    }
-    if (q.tipe === "isian") {
-      return {
-        Tipe: "isian",
-        Pertanyaan: q.teks,
-        Bobot: q.bobot,
-        Opsi_A: "",
-        Opsi_B: "",
-        Opsi_C: "",
-        Opsi_D: "",
-        Opsi_E: "",
-        Kunci: (q.kunci_isian || []).join("|"),
-        Pasangan: "",
-      };
-    }
-    if (q.tipe === "jodoh") {
-      return {
-        Tipe: "jodoh",
-        Pertanyaan: q.teks,
-        Bobot: q.bobot,
-        Opsi_A: "",
-        Opsi_B: "",
-        Opsi_C: "",
-        Opsi_D: "",
-        Opsi_E: "",
-        Kunci: "",
-        Pasangan: (q.pasangan_jodoh || [])
-          .map((p) => `${p.kiri}=${p.kanan}`)
-          .join("|"),
-      };
-    }
-    return {
-      Tipe: "essay",
-      Pertanyaan: q.teks,
-      Bobot: q.bobot,
-      Opsi_A: "",
-      Opsi_B: "",
-      Opsi_C: "",
-      Opsi_D: "",
-      Opsi_E: "",
-      Kunci: "",
-      Pasangan: "",
-    };
-  });
-
-  const ws = XLSX.utils.json_to_sheet(rows);
-  ws["!cols"] = [
-    { wch: 10 },
-    { wch: 52 },
-    { wch: 8 },
-    { wch: 24 },
-    { wch: 24 },
-    { wch: 24 },
-    { wch: 24 },
-    { wch: 24 },
-    { wch: 22 },
-    { wch: 40 },
-  ];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  return wb;
-}
+export { buildExcelWorkbookFromGenerated } from "@/lib/ai-question-utils";
 
 export default function AiQuestionModal({
   initialSubjectId,
@@ -263,68 +111,31 @@ export default function AiQuestionModal({
     );
   }
 
-  function clampCount(val: string): number {
-    const n = Number(val);
-    if (Number.isNaN(n) || n < 0) return 0;
-    return Math.min(MAX_PER_TYPE, Math.floor(n));
-  }
-
-  function buildCopyablePrompt() {
-    const cpLines =
-      selectedCps.length > 0
-        ? selectedCps
-            .map((cp, i) => `${i + 1}. [${cp.elemen}] ${cp.deskripsi}`)
-            .join("\n")
-        : "(Sesuai topik di bawah)";
-
-    return `Buatkan soal ujian CBT dalam Bahasa Indonesia sesuai Kurikulum Merdeka SMK:
-- Mata Pelajaran: ${activeSubjectName}
-- Jenjang / Kelas: ${GRADE_LABELS[grade].label}
-- Tingkat Kesulitan: ${difficulty}
-- Capaian Pembelajaran (CP):
-${cpLines}
-${topic.trim() ? `- Topik / Catatan Khusus: ${topic.trim()}` : ""}
-
-Jumlah soal:
-- Pilihan Ganda (pg): ${countPg} soal (5 opsi A-E, 1 benar, bobot 1)
-- Isian Singkat (isian): ${countIsian} soal (1-2 variasi kunci, bobot 2)
-- Menjodohkan (jodoh): ${countJodoh} soal (3-4 pasangan kiri & kanan, bobot 3)
-- Essay (essay): ${countEssay} soal (bobot 5)
-
-PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis mengikuti format ini:
-[
-  {"tipe":"pg","teks":"Pertanyaan...","bobot":1,"opsi_pg":[{"teks":"Opsi A","benar":false},{"teks":"Opsi B","benar":true},{"teks":"Opsi C","benar":false},{"teks":"Opsi D","benar":false},{"teks":"Opsi E","benar":false}]},
-  {"tipe":"isian","teks":"Pertanyaan...","bobot":2,"kunci_isian":["jawaban 1","jawaban 2"]},
-  {"tipe":"jodoh","teks":"Pasangkan item berikut:","bobot":3,"pasangan_jodoh":[{"kiri":"Item 1","kanan":"Pasangan 1"},{"kiri":"Item 2","kanan":"Pasangan 2"}]},
-  {"tipe":"essay","teks":"Pertanyaan uraian...","bobot":5}
-]`;
-  }
-
   async function copyPrompt() {
-    await navigator.clipboard.writeText(buildCopyablePrompt());
+    const prompt = buildCopyablePrompt({
+      subjectName: activeSubjectName,
+      gradeLabel: GRADE_LABELS[grade].label,
+      difficulty,
+      selectedCps,
+      topic,
+      countPg,
+      countIsian,
+      countJodoh,
+      countEssay,
+    });
+    await navigator.clipboard.writeText(prompt);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function parsePastedJson() {
+  function handleParsePastedJson() {
     setError("");
-    try {
-      const cleaned = pastedJson
-        .trim()
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/\s*```$/i, "");
-      const arr = JSON.parse(cleaned);
-      if (!Array.isArray(arr) || arr.length === 0) {
-        setError("Format harus berupa JSON array [...] berisi minimal 1 soal.");
-        return;
-      }
-      setResults(arr as GeneratedQuestion[]);
-    } catch {
-      setError(
-        "JSON tidak valid. Pastikan Anda menyalin seluruh tanda [ ... ] dari hasil ChatGPT/Gemini."
-      );
+    const parsed = parsePastedAiJson(pastedJson);
+    if (!parsed.ok) {
+      setError(parsed.error);
+      return;
     }
+    setResults(parsed.questions);
   }
 
   // Eksekutor 1 batch di dalam antrian
@@ -451,7 +262,9 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
     if (!target) return;
 
     const updatedQueue = queue.map((q) =>
-      q.id === batchId ? { ...q, status: "queued" as const, errorMsg: undefined } : q
+      q.id === batchId
+        ? { ...q, status: "queued" as const, errorMsg: undefined }
+        : q
     );
     setQueue(updatedQueue);
     await processQueue(updatedQueue, results);
@@ -562,7 +375,8 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
                 Mode AI Generator Soal (Sistem Antrian & Auto-Batching)
               </h2>
               <p className="text-xs text-slate-500">
-                Maksimal 50 soal per tipe — otomatis dipecah ke antrian per {BATCH_SIZE} soal agar server ringan & bebas timeout.
+                Maksimal 50 soal per tipe — otomatis dipecah ke antrian per{" "}
+                {BATCH_SIZE} soal agar server ringan & bebas timeout.
               </p>
             </div>
           </div>
@@ -726,62 +540,28 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
         {/* Jumlah Soal per Tipe (Maks 50 per tipe) */}
         <div className="space-y-1.5">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">
-                Pilihan Ganda <span className="text-slate-400">(maks 50)</span>
-              </label>
-              <input
-                type="number"
-                disabled={runningQueue}
-                min={0}
-                max={MAX_PER_TYPE}
-                value={countPg}
-                onChange={(e) => setCountPg(clampCount(e.target.value))}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">
-                Isian Singkat <span className="text-slate-400">(maks 50)</span>
-              </label>
-              <input
-                type="number"
-                disabled={runningQueue}
-                min={0}
-                max={MAX_PER_TYPE}
-                value={countIsian}
-                onChange={(e) => setCountIsian(clampCount(e.target.value))}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">
-                Menjodohkan <span className="text-slate-400">(maks 50)</span>
-              </label>
-              <input
-                type="number"
-                disabled={runningQueue}
-                min={0}
-                max={MAX_PER_TYPE}
-                value={countJodoh}
-                onChange={(e) => setCountJodoh(clampCount(e.target.value))}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">
-                Essay <span className="text-slate-400">(maks 50)</span>
-              </label>
-              <input
-                type="number"
-                disabled={runningQueue}
-                min={0}
-                max={MAX_PER_TYPE}
-                value={countEssay}
-                onChange={(e) => setCountEssay(clampCount(e.target.value))}
-                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-              />
-            </div>
+            {[
+              { label: "Pilihan Ganda", val: countPg, set: setCountPg },
+              { label: "Isian Singkat", val: countIsian, set: setCountIsian },
+              { label: "Menjodohkan", val: countJodoh, set: setCountJodoh },
+              { label: "Essay", val: countEssay, set: setCountEssay },
+            ].map((field) => (
+              <div key={field.label}>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  {field.label}{" "}
+                  <span className="text-slate-400">(maks {MAX_PER_TYPE})</span>
+                </label>
+                <input
+                  type="number"
+                  disabled={runningQueue}
+                  min={0}
+                  max={MAX_PER_TYPE}
+                  value={field.val}
+                  onChange={(e) => field.set(clampQuestionCount(e.target.value))}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                />
+              </div>
+            ))}
           </div>
           {totalRequested > BATCH_SIZE && (
             <p className="text-[11px] text-purple-700">
@@ -839,7 +619,10 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
         )}
 
         {mode === "auto" ? (
-          <form onSubmit={handleStartQueue} className="flex flex-wrap items-center gap-2">
+          <form
+            onSubmit={handleStartQueue}
+            className="flex flex-wrap items-center gap-2"
+          >
             <button
               type="submit"
               disabled={
@@ -851,7 +634,8 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
             >
               {runningQueue ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Memproses Antrian...
+                  <Loader2 className="w-4 h-4 animate-spin" /> Memproses
+                  Antrian...
                 </>
               ) : (
                 <>
@@ -903,7 +687,7 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
             </div>
             <button
               type="button"
-              onClick={parsePastedJson}
+              onClick={handleParsePastedJson}
               disabled={!pastedJson.trim()}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white rounded-lg text-xs font-semibold cursor-pointer"
             >
@@ -994,109 +778,18 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           </div>
         )}
 
-        {/* Pratinjau Hasil Generate AI */}
-        {results.length > 0 && (
-          <div className="border-t border-slate-200 pt-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="font-bold text-sm text-slate-900">
-                Pratinjau Hasil ({results.length} Soal — {activeSubjectName} Kelas{" "}
-                {grade})
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={runningQueue}
-                  onClick={exportGeneratedToExcel}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-800 rounded-lg text-xs font-semibold cursor-pointer"
-                >
-                  <Download className="w-4 h-4" /> Unduh ke Excel
-                </button>
-                <button
-                  type="button"
-                  disabled={saving || runningQueue}
-                  onClick={saveAllToBank}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-xs font-semibold cursor-pointer"
-                >
-                  <Save className="w-4 h-4" />
-                  {saving
-                    ? "Menyimpan..."
-                    : `Simpan Semua (${results.length}) ke Bank Soal`}
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-              {results.map((q, idx) => (
-                <div
-                  key={idx}
-                  className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2 text-xs"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-700">#{idx + 1}</span>
-                      <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-medium">
-                        {questionTypeLabel(q.tipe)}
-                      </span>
-                      <span className="text-slate-500">Bobot: {q.bobot}</span>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={runningQueue}
-                      onClick={() =>
-                        setResults((prev) => prev.filter((_, i) => i !== idx))
-                      }
-                      title="Hapus soal ini dari daftar"
-                      className="text-red-500 hover:bg-red-50 p-1 rounded cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  <div className="text-sm text-slate-900 whitespace-pre-wrap">
-                    {q.teks}
-                  </div>
-
-                  {q.tipe === "pg" && q.opsi_pg && (
-                    <div className="grid sm:grid-cols-2 gap-1">
-                      {q.opsi_pg.map((o, i) => (
-                        <div
-                          key={i}
-                          className={`px-2 py-1 rounded border ${
-                            o.benar
-                              ? "bg-emerald-50 border-emerald-300 text-emerald-900 font-semibold"
-                              : "bg-white border-slate-200 text-slate-700"
-                          }`}
-                        >
-                          {String.fromCharCode(65 + i)}. {o.teks}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {q.tipe === "isian" && q.kunci_isian && (
-                    <div className="text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded">
-                      <strong>Kunci:</strong> {q.kunci_isian.join(" / ")}
-                    </div>
-                  )}
-
-                  {q.tipe === "jodoh" && q.pasangan_jodoh && (
-                    <div className="grid sm:grid-cols-2 gap-1">
-                      {q.pasangan_jodoh.map((p, i) => (
-                        <div
-                          key={i}
-                          className="px-2 py-1 rounded bg-white border border-slate-200"
-                        >
-                          {p.kiri} →{" "}
-                          <strong className="text-emerald-700">{p.kanan}</strong>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <AiQuestionPreview
+          results={results}
+          subjectName={activeSubjectName}
+          grade={grade}
+          runningQueue={runningQueue}
+          saving={saving}
+          onExportExcel={exportGeneratedToExcel}
+          onSaveAll={saveAllToBank}
+          onRemoveAt={(idx) =>
+            setResults((prev) => prev.filter((_, i) => i !== idx))
+          }
+        />
       </div>
     </div>
   );
