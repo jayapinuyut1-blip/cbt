@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getCurrentUserProfile } from "@/lib/server-auth";
 import { createServerSupabase } from "@/lib/supabase/server";
 
+export const maxDuration = 60;
+
 export interface GeneratedQuestion {
   tipe: "pg" | "isian" | "jodoh" | "essay";
   teks: string;
@@ -11,7 +13,30 @@ export interface GeneratedQuestion {
   pasangan_jodoh?: Array<{ kiri: string; kanan: string }>;
 }
 
-// Prioritaskan model cepat & stabil dengan fallback otomatis bila ada 503 / gagal parse
+// Antrian FIFO server-side: maksimal 2 request AI aktif bersamaan agar tidak kena rate-limit 429
+const MAX_CONCURRENT_AI = 2;
+let activeAiJobs = 0;
+const waitQueue: Array<() => void> = [];
+
+function acquireAiSlot(): Promise<void> {
+  if (activeAiJobs < MAX_CONCURRENT_AI) {
+    activeAiJobs++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    waitQueue.push(() => {
+      activeAiJobs++;
+      resolve();
+    });
+  });
+}
+
+function releaseAiSlot() {
+  activeAiJobs = Math.max(0, activeAiJobs - 1);
+  const next = waitQueue.shift();
+  if (next) next();
+}
+
 const GEMINI_MODELS = [
   "gemini-3.5-flash-lite",
   "gemini-3.1-flash-lite",
@@ -19,7 +44,6 @@ const GEMINI_MODELS = [
   "gemini-3.8-flash",
 ];
 
-// Skema JSON ketat agar Gemini selalu mengeluarkan JSON valid tanpa terpotong formatnya
 const RESPONSE_SCHEMA = {
   type: "ARRAY",
   items: {
@@ -111,12 +135,15 @@ export async function POST(request: Request) {
     const topic = String(body.topic || "").trim();
     const selectedCps: Array<{ elemen: string; deskripsi: string }> =
       Array.isArray(body.selectedCps) ? body.selectedCps : [];
+    const avoidQuestions: string[] = Array.isArray(body.avoidQuestions)
+      ? body.avoidQuestions.map((s: unknown) => String(s).slice(0, 120)).slice(-30)
+      : [];
     const gradeLevel = String(body.gradeLevel || "Kelas X SMK (Fase E)").trim();
     const difficulty = String(body.difficulty || "Sedang").trim();
-    const countPg = Math.max(0, Math.min(30, Number(body.countPg || 0)));
+    const countPg = Math.max(0, Math.min(15, Number(body.countPg || 0)));
     const countIsian = Math.max(0, Math.min(15, Number(body.countIsian || 0)));
-    const countJodoh = Math.max(0, Math.min(10, Number(body.countJodoh || 0)));
-    const countEssay = Math.max(0, Math.min(10, Number(body.countEssay || 0)));
+    const countJodoh = Math.max(0, Math.min(15, Number(body.countJodoh || 0)));
+    const countEssay = Math.max(0, Math.min(15, Number(body.countEssay || 0)));
 
     if (!topic && selectedCps.length === 0) {
       return NextResponse.json(
@@ -135,9 +162,9 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (totalRequested > 40) {
+    if (totalRequested > 15) {
       return NextResponse.json(
-        { error: "Maksimal 40 soal per sekali generate agar hasil akurat." },
+        { error: "Maksimal 15 soal per batch antrian agar server ringan." },
         { status: 400 }
       );
     }
@@ -177,6 +204,13 @@ export async function POST(request: Request) {
             .join("\n")
         : "(Mengikuti topik/materi acuan di bawah)";
 
+    const avoidBlock =
+      avoidQuestions.length > 0
+        ? `\nHINDARI mengulang atau membuat soal yang mirip dengan pertanyaan yang sudah ada berikut:\n${avoidQuestions
+            .map((q, i) => `- (${i + 1}) ${q}`)
+            .join("\n")}\n`
+        : "";
+
     const prompt = `Anda adalah guru SMK profesional di Indonesia pembuat soal ujian CBT berkualitas tinggi sesuai Kurikulum Merdeka (BSKAP).
 Buatkan soal ujian dalam Bahasa Indonesia yang jelas, baku, tidak ambigu, dan kontekstual untuk siswa SMK.
 
@@ -187,8 +221,8 @@ Detail Permintaan:
 - Capaian Pembelajaran (CP) yang Diujikan:
 ${cpBlock}
 ${topic ? `- Fokus Topik / Materi Tambahan dari Guru:\n"""\n${topic}\n"""` : ""}
-
-Jumlah soal yang WAJIB dibuat:
+${avoidBlock}
+Jumlah soal yang WAJIB dibuat pada batch ini:
 - Pilihan Ganda (tipe "pg"): ${countPg} soal (masing-masing 5 opsi A-E di "opsi_pg", tepat 1 opsi benar=true, bobot 1, JANGAN tulis label "A."/"B." di teks opsi, acak posisi jawaban benar)
 - Isian Singkat (tipe "isian"): ${countIsian} soal (sertakan 1-3 variasi kunci jawaban singkat di "kunci_isian", bobot 2)
 - Menjodohkan (tipe "jodoh"): ${countJodoh} soal (masing-masing 3-4 pasangan kiri & kanan unik di "pasangan_jodoh", bobot 3)
@@ -196,62 +230,72 @@ Jumlah soal yang WAJIB dibuat:
 
 Kembalikan HANYA JSON array sesuai skema.`;
 
+    // Masuk ke antrian FIFO server-side
+    await acquireAiSlot();
+
     let lastError = "Gagal menghubungi Gemini API.";
     let parsedArray: unknown[] | null = null;
 
-    for (const model of GEMINI_MODELS) {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
-        apiKey
-      )}`;
-      const resp = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 16384,
-            responseMimeType: "application/json",
-            responseSchema: RESPONSE_SCHEMA,
-          },
-        }),
-      });
+    try {
+      for (const model of GEMINI_MODELS) {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
+          apiKey
+        )}`;
+        const resp = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.75,
+              maxOutputTokens: 12288,
+              responseMimeType: "application/json",
+              responseSchema: RESPONSE_SCHEMA,
+            },
+          }),
+        });
 
-      if (!resp.ok) {
-        const errText = await resp.text();
-        lastError = `Gemini (${model}) error ${resp.status}: ${errText.slice(0, 180)}`;
-        continue;
+        if (!resp.ok) {
+          const errText = await resp.text();
+          lastError = `Gemini (${model}) error ${resp.status}: ${errText.slice(0, 160)}`;
+          if (resp.status === 429 || resp.status === 503) {
+            // Jedai sejenak sebelum mencoba model fallback berikutnya
+            await new Promise((r) => setTimeout(r, 700));
+          }
+          continue;
+        }
+
+        const data = await resp.json();
+        const parts: Array<{ thought?: boolean; text?: string }> =
+          data?.candidates?.[0]?.content?.parts || [];
+
+        const rawText = parts
+          .filter((p) => !p.thought && typeof p.text === "string")
+          .map((p) => p.text)
+          .join("")
+          .trim();
+
+        if (!rawText) {
+          lastError = `Gemini (${model}) mengembalikan respon kosong.`;
+          continue;
+        }
+
+        const arr = tryParseJsonArray(rawText);
+        if (arr && arr.length > 0) {
+          parsedArray = arr;
+          break;
+        }
+        lastError = `Format JSON dari ${model} tidak lengkap (finishReason: ${
+          data?.candidates?.[0]?.finishReason || "unknown"
+        }).`;
       }
-
-      const data = await resp.json();
-      const parts: Array<{ thought?: boolean; text?: string }> =
-        data?.candidates?.[0]?.content?.parts || [];
-
-      // Saring keluar bagian "thought" dari thinking models agar hanya JSON jawaban yang diambil
-      const rawText = parts
-        .filter((p) => !p.thought && typeof p.text === "string")
-        .map((p) => p.text)
-        .join("")
-        .trim();
-
-      if (!rawText) {
-        lastError = `Gemini (${model}) mengembalikan respon kosong.`;
-        continue;
-      }
-
-      const arr = tryParseJsonArray(rawText);
-      if (arr && arr.length > 0) {
-        parsedArray = arr;
-        break;
-      }
-      lastError = `Format JSON dari ${model} tidak lengkap (finishReason: ${
-        data?.candidates?.[0]?.finishReason || "unknown"
-      }).`;
+    } finally {
+      releaseAiSlot();
     }
 
     if (!parsedArray) {
       return NextResponse.json(
-        { error: `${lastError} Silakan coba klik Generate ulang.` },
+        { error: `${lastError} Silakan ulangi batch ini.` },
         { status: 502 }
       );
     }
@@ -308,7 +352,7 @@ Kembalikan HANYA JSON array sesuai skema.`;
 
     if (valid.length === 0) {
       return NextResponse.json(
-        { error: "AI tidak menghasilkan soal yang valid. Coba ulangi." },
+        { error: "AI tidak menghasilkan soal yang valid. Coba ulangi batch." },
         { status: 502 }
       );
     }

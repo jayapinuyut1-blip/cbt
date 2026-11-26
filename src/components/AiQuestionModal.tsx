@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import { questionTypeLabel } from "@/lib/format";
@@ -22,7 +22,89 @@ import {
   Loader2,
   ClipboardPaste,
   BookOpenCheck,
+  StopCircle,
+  RotateCcw,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
 } from "lucide-react";
+
+const BATCH_SIZE = 10; // Maks 10 soal per gelombang antrian agar cepat & tidak timeout Vercel
+const MAX_PER_TYPE = 50; // Maks 50 per tipe soal
+
+interface BatchQueueItem {
+  id: number;
+  label: string;
+  countPg: number;
+  countIsian: number;
+  countJodoh: number;
+  countEssay: number;
+  total: number;
+  status: "queued" | "running" | "done" | "error" | "cancelled";
+  generatedCount?: number;
+  errorMsg?: string;
+}
+
+function buildBatches(
+  pg: number,
+  isian: number,
+  jodoh: number,
+  essay: number
+): BatchQueueItem[] {
+  const batches: BatchQueueItem[] = [];
+  let idCounter = 1;
+
+  const addTypeBatches = (
+    typeKey: "pg" | "isian" | "jodoh" | "essay",
+    typeLabel: string,
+    total: number
+  ) => {
+    let remaining = total;
+    while (remaining > 0) {
+      const take = Math.min(BATCH_SIZE, remaining);
+      batches.push({
+        id: idCounter++,
+        label: `${take} ${typeLabel}`,
+        countPg: typeKey === "pg" ? take : 0,
+        countIsian: typeKey === "isian" ? take : 0,
+        countJodoh: typeKey === "jodoh" ? take : 0,
+        countEssay: typeKey === "essay" ? take : 0,
+        total: take,
+        status: "queued",
+      });
+      remaining -= take;
+    }
+  };
+
+  // Jika total semua tipe <= BATCH_SIZE, gabungkan jadi 1 batch super cepat!
+  const grandTotal = pg + isian + jodoh + essay;
+  if (grandTotal > 0 && grandTotal <= BATCH_SIZE) {
+    const parts: string[] = [];
+    if (pg > 0) parts.push(`${pg} PG`);
+    if (isian > 0) parts.push(`${isian} Isian`);
+    if (jodoh > 0) parts.push(`${jodoh} Jodoh`);
+    if (essay > 0) parts.push(`${essay} Essay`);
+    return [
+      {
+        id: 1,
+        label: parts.join(", "),
+        countPg: pg,
+        countIsian: isian,
+        countJodoh: jodoh,
+        countEssay: essay,
+        total: grandTotal,
+        status: "queued",
+      },
+    ];
+  }
+
+  addTypeBatches("pg", "Pilihan Ganda", pg);
+  addTypeBatches("isian", "Isian Singkat", isian);
+  addTypeBatches("jodoh", "Menjodohkan", jodoh);
+  addTypeBatches("essay", "Essay", essay);
+
+  return batches;
+}
 
 export function buildExcelWorkbookFromGenerated(
   items: GeneratedQuestion[],
@@ -123,18 +205,23 @@ export default function AiQuestionModal({
 }) {
   const supabase = createClient();
   const [mode, setMode] = useState<"auto" | "prompt">("auto");
-  const [activeSubjectId, setActiveSubjectId] = useState<number>(initialSubjectId);
+  const [activeSubjectId, setActiveSubjectId] =
+    useState<number>(initialSubjectId);
   const [grade, setGrade] = useState<GradeOption>("X");
   const [selectedCpIds, setSelectedCpIds] = useState<string[]>([]);
   const [topic, setTopic] = useState("");
   const [showCustomTopic, setShowCustomTopic] = useState(false);
   const [difficulty, setDifficulty] = useState("Sedang (Campuran C2-C4)");
-  const [countPg, setCountPg] = useState(5);
-  const [countIsian, setCountIsian] = useState(2);
-  const [countJodoh, setCountJodoh] = useState(1);
-  const [countEssay, setCountEssay] = useState(1);
+  const [countPg, setCountPg] = useState(10);
+  const [countIsian, setCountIsian] = useState(0);
+  const [countJodoh, setCountJodoh] = useState(0);
+  const [countEssay, setCountEssay] = useState(0);
 
-  const [generating, setGenerating] = useState(false);
+  // State Sistem Antrian (Auto-Batching)
+  const [queue, setQueue] = useState<BatchQueueItem[]>([]);
+  const [runningQueue, setRunningQueue] = useState(false);
+  const cancelFlagRef = useRef(false);
+
   const [error, setError] = useState("");
   const [results, setResults] = useState<GeneratedQuestion[]>([]);
   const [saving, setSaving] = useState(false);
@@ -151,7 +238,6 @@ export default function AiQuestionModal({
     [activeSubjectName, grade]
   );
 
-  // Reset pilihan CP saat ganti mapel atau kelas, otomatis centang CP pertama agar praktis
   useEffect(() => {
     if (availableCps.length > 0) {
       setSelectedCpIds([availableCps[0].id]);
@@ -165,10 +251,22 @@ export default function AiQuestionModal({
     [availableCps, selectedCpIds]
   );
 
+  const totalRequested =
+    Math.min(MAX_PER_TYPE, Math.max(0, countPg)) +
+    Math.min(MAX_PER_TYPE, Math.max(0, countIsian)) +
+    Math.min(MAX_PER_TYPE, Math.max(0, countJodoh)) +
+    Math.min(MAX_PER_TYPE, Math.max(0, countEssay));
+
   function toggleCp(id: string) {
     setSelectedCpIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
+  }
+
+  function clampCount(val: string): number {
+    const n = Number(val);
+    if (Number.isNaN(n) || n < 0) return 0;
+    return Math.min(MAX_PER_TYPE, Math.floor(n));
   }
 
   function buildCopyablePrompt() {
@@ -229,46 +327,138 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
     }
   }
 
-  async function handleAutoGenerate(e: React.FormEvent) {
+  // Eksekutor 1 batch di dalam antrian
+  async function executeSingleBatch(
+    batch: BatchQueueItem,
+    existingTexts: string[]
+  ): Promise<GeneratedQuestion[]> {
+    const res = await fetch("/api/guru/generate-questions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subjectId: activeSubjectId,
+        subjectName: activeSubjectName,
+        gradeLevel: GRADE_LABELS[grade].label,
+        selectedCps: selectedCps.map((c) => ({
+          elemen: c.elemen,
+          deskripsi: c.deskripsi,
+        })),
+        topic,
+        difficulty,
+        countPg: batch.countPg,
+        countIsian: batch.countIsian,
+        countJodoh: batch.countJodoh,
+        countEssay: batch.countEssay,
+        avoidQuestions: existingTexts.slice(-25),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "Gagal generate batch.");
+    }
+    return (data.questions || []) as GeneratedQuestion[];
+  }
+
+  // Jalankan antrian batch secara berurutan (FIFO) dengan cooldown ringan & anti-duplikat
+  async function processQueue(
+    initialQueue: BatchQueueItem[],
+    startingResults: GeneratedQuestion[]
+  ) {
+    cancelFlagRef.current = false;
+    setRunningQueue(true);
+    setError("");
+
+    const accumulated = [...startingResults];
+
+    for (let i = 0; i < initialQueue.length; i++) {
+      const item = initialQueue[i];
+      if (item.status === "done") continue;
+
+      if (cancelFlagRef.current) {
+        setQueue((prev) =>
+          prev.map((q, idx) =>
+            idx >= i && q.status === "queued"
+              ? { ...q, status: "cancelled" }
+              : q
+          )
+        );
+        break;
+      }
+
+      setQueue((prev) =>
+        prev.map((q) =>
+          q.id === item.id
+            ? { ...q, status: "running", errorMsg: undefined }
+            : q
+        )
+      );
+
+      try {
+        const batchQuestions = await executeSingleBatch(
+          item,
+          accumulated.map((x) => x.teks)
+        );
+        accumulated.push(...batchQuestions);
+        setResults([...accumulated]);
+
+        setQueue((prev) =>
+          prev.map((q) =>
+            q.id === item.id
+              ? { ...q, status: "done", generatedCount: batchQuestions.length }
+              : q
+          )
+        );
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Gagal memproses batch.";
+        setQueue((prev) =>
+          prev.map((q) =>
+            q.id === item.id ? { ...q, status: "error", errorMsg: msg } : q
+          )
+        );
+      }
+
+      // Cooldown 700ms antar batch agar server & kuota RPM Gemini tetap stabil
+      if (i < initialQueue.length - 1 && !cancelFlagRef.current) {
+        await new Promise((r) => setTimeout(r, 700));
+      }
+    }
+
+    setRunningQueue(false);
+  }
+
+  async function handleStartQueue(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     if (selectedCps.length === 0 && !topic.trim()) {
-      setError("Pilih minimal 1 Capaian Pembelajaran atau tulis topik materi.");
+      setError("Pilih minimal 1 Capaian Pembelajaran atau tulis catatan materi.");
+      return;
+    }
+    if (totalRequested <= 0) {
+      setError("Masukkan minimal 1 soal untuk dibuat.");
       return;
     }
 
-    setGenerating(true);
-    try {
-      const res = await fetch("/api/guru/generate-questions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subjectId: activeSubjectId,
-          subjectName: activeSubjectName,
-          gradeLevel: GRADE_LABELS[grade].label,
-          selectedCps: selectedCps.map((c) => ({
-            elemen: c.elemen,
-            deskripsi: c.deskripsi,
-          })),
-          topic,
-          difficulty,
-          countPg,
-          countIsian,
-          countJodoh,
-          countEssay,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Gagal generate soal.");
-      } else {
-        setResults(data.questions || []);
-      }
-    } catch {
-      setError("Koneksi ke server terputus.");
-    } finally {
-      setGenerating(false);
-    }
+    const batches = buildBatches(countPg, countIsian, countJodoh, countEssay);
+    setQueue(batches);
+    setResults([]);
+    await processQueue(batches, []);
+  }
+
+  async function retryFailedBatch(batchId: number) {
+    if (runningQueue) return;
+    const target = queue.find((q) => q.id === batchId);
+    if (!target) return;
+
+    const updatedQueue = queue.map((q) =>
+      q.id === batchId ? { ...q, status: "queued" as const, errorMsg: undefined } : q
+    );
+    setQueue(updatedQueue);
+    await processQueue(updatedQueue, results);
+  }
+
+  function handleCancelQueue() {
+    cancelFlagRef.current = true;
   }
 
   async function saveAllToBank() {
@@ -355,6 +545,10 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
     XLSX.writeFile(wb, `soal-ai-${safeName}-kelas-${grade}.xlsx`);
   }
 
+  const doneBatches = queue.filter((q) => q.status === "done").length;
+  const progressPct =
+    queue.length > 0 ? Math.round((doneBatches / queue.length) * 100) : 0;
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
       <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[92vh] overflow-y-auto p-6 space-y-5">
@@ -365,15 +559,18 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
             </div>
             <div>
               <h2 className="font-bold text-lg text-slate-900">
-                Mode AI Generator Soal (Kurikulum Merdeka SMK)
+                Mode AI Generator Soal (Sistem Antrian & Auto-Batching)
               </h2>
               <p className="text-xs text-slate-500">
-                Pilih mapel yang Anda ampu, kelas, dan Capaian Pembelajaran (CP) resmi BSKAP.
+                Maksimal 50 soal per tipe — otomatis dipecah ke antrian per {BATCH_SIZE} soal agar server ringan & bebas timeout.
               </p>
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              cancelFlagRef.current = true;
+              onClose();
+            }}
             className="p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -384,6 +581,7 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
         <div className="flex gap-2">
           <button
             type="button"
+            disabled={runningQueue}
             onClick={() => setMode("auto")}
             className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold cursor-pointer ${
               mode === "auto"
@@ -395,6 +593,7 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           </button>
           <button
             type="button"
+            disabled={runningQueue}
             onClick={() => setMode("prompt")}
             className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold cursor-pointer ${
               mode === "prompt"
@@ -406,13 +605,14 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           </button>
         </div>
 
-        {/* Mapel yang Diampu, Kelas & Tingkat Kesulitan */}
+        {/* Mapel Diampu, Kelas & Tingkat Kesulitan */}
         <div className="grid sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">
               Mata Pelajaran Diampu
             </label>
             <select
+              disabled={runningQueue}
               value={activeSubjectId}
               onChange={(e) => setActiveSubjectId(Number(e.target.value))}
               className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
@@ -429,6 +629,7 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
               Kelas & Fase
             </label>
             <select
+              disabled={runningQueue}
               value={grade}
               onChange={(e) => setGrade(e.target.value as GradeOption)}
               className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
@@ -443,27 +644,32 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
               Tingkat Kesulitan
             </label>
             <select
+              disabled={runningQueue}
               value={difficulty}
               onChange={(e) => setDifficulty(e.target.value)}
               className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
             >
               <option value="Mudah (C1-C2)">Mudah (Pemahaman Dasar)</option>
               <option value="Sedang (Campuran C2-C4)">Sedang (Campuran)</option>
-              <option value="HOTS (C4-C6 Penalaran)">HOTS (Analisis & Penalaran)</option>
+              <option value="HOTS (C4-C6 Penalaran)">
+                HOTS (Analisis & Penalaran)
+              </option>
             </select>
           </div>
         </div>
 
-        {/* Pilihan Capaian Pembelajaran (CP) Dinamis */}
+        {/* Pilihan Capaian Pembelajaran (CP) */}
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
               <BookOpenCheck className="w-4 h-4 text-purple-600" />
-              Capaian Pembelajaran (CP) — {activeSubjectName} ({GRADE_LABELS[grade].label})
+              Capaian Pembelajaran (CP) — {activeSubjectName} (
+              {GRADE_LABELS[grade].label})
             </label>
             {availableCps.length > 0 && (
               <button
                 type="button"
+                disabled={runningQueue}
                 onClick={() =>
                   setSelectedCpIds(
                     selectedCpIds.length === availableCps.length
@@ -481,18 +687,19 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           </div>
 
           {availableCps.length > 0 ? (
-            <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+            <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
               {availableCps.map((cp) => {
                 const checked = selectedCpIds.includes(cp.id);
                 return (
                   <label
                     key={cp.id}
-                    className={`flex items-start gap-2.5 p-3 cursor-pointer transition ${
+                    className={`flex items-start gap-2.5 p-2.5 cursor-pointer transition ${
                       checked ? "bg-purple-50/70" : "hover:bg-slate-50"
                     }`}
                   >
                     <input
                       type="checkbox"
+                      disabled={runningQueue}
                       className="mt-1"
                       checked={checked}
                       onChange={() => toggleCp(cp.id)}
@@ -511,68 +718,81 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
             </div>
           ) : (
             <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
-              Katalog CP bawaan untuk mapel ini belum tersedia. Silakan tulis topik atau tempel teks materi di kolom bawah.
+              Katalog CP bawaan untuk mapel ini belum tersedia. Silakan tulis catatan materi di kolom bawah.
             </div>
           )}
         </div>
 
-        {/* Jumlah Soal per Tipe */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">
-              Pilihan Ganda
-            </label>
-            <input
-              type="number"
-              min={0}
-              max={30}
-              value={countPg}
-              onChange={(e) => setCountPg(Number(e.target.value))}
-              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-            />
+        {/* Jumlah Soal per Tipe (Maks 50 per tipe) */}
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                Pilihan Ganda <span className="text-slate-400">(maks 50)</span>
+              </label>
+              <input
+                type="number"
+                disabled={runningQueue}
+                min={0}
+                max={MAX_PER_TYPE}
+                value={countPg}
+                onChange={(e) => setCountPg(clampCount(e.target.value))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                Isian Singkat <span className="text-slate-400">(maks 50)</span>
+              </label>
+              <input
+                type="number"
+                disabled={runningQueue}
+                min={0}
+                max={MAX_PER_TYPE}
+                value={countIsian}
+                onChange={(e) => setCountIsian(clampCount(e.target.value))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                Menjodohkan <span className="text-slate-400">(maks 50)</span>
+              </label>
+              <input
+                type="number"
+                disabled={runningQueue}
+                min={0}
+                max={MAX_PER_TYPE}
+                value={countJodoh}
+                onChange={(e) => setCountJodoh(clampCount(e.target.value))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1">
+                Essay <span className="text-slate-400">(maks 50)</span>
+              </label>
+              <input
+                type="number"
+                disabled={runningQueue}
+                min={0}
+                max={MAX_PER_TYPE}
+                value={countEssay}
+                onChange={(e) => setCountEssay(clampCount(e.target.value))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">
-              Isian Singkat
-            </label>
-            <input
-              type="number"
-              min={0}
-              max={15}
-              value={countIsian}
-              onChange={(e) => setCountIsian(Number(e.target.value))}
-              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">
-              Menjodohkan
-            </label>
-            <input
-              type="number"
-              min={0}
-              max={10}
-              value={countJodoh}
-              onChange={(e) => setCountJodoh(Number(e.target.value))}
-              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">
-              Essay
-            </label>
-            <input
-              type="number"
-              min={0}
-              max={10}
-              value={countEssay}
-              onChange={(e) => setCountEssay(Number(e.target.value))}
-              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-            />
-          </div>
+          {totalRequested > BATCH_SIZE && (
+            <p className="text-[11px] text-purple-700">
+              Total {totalRequested} soal akan diproses otomatis melalui sistem antrian (
+              {buildBatches(countPg, countIsian, countJodoh, countEssay).length}{" "}
+              gelombang × maks {BATCH_SIZE} soal) agar server tetap ringan.
+            </p>
+          )}
         </div>
 
-        {/* Catatan / Materi Tambahan (Toggle Opsional jika CP tersedia) */}
+        {/* Catatan / Materi Tambahan (Toggle Opsional) */}
         {availableCps.length === 0 || showCustomTopic ? (
           <div>
             <div className="flex items-center justify-between mb-1">
@@ -585,6 +805,7 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
               {availableCps.length > 0 && (
                 <button
                   type="button"
+                  disabled={runningQueue}
                   onClick={() => {
                     setShowCustomTopic(false);
                     setTopic("");
@@ -597,6 +818,7 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
             </div>
             <textarea
               rows={3}
+              disabled={runningQueue}
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               placeholder="Contoh: Fokus pada studi kasus praktik lapangan, atau tempel ringkasan bab tertentu..."
@@ -607,6 +829,7 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           <div>
             <button
               type="button"
+              disabled={runningQueue}
               onClick={() => setShowCustomTopic(true)}
               className="text-xs text-purple-700 hover:underline font-medium cursor-pointer"
             >
@@ -616,35 +839,53 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
         )}
 
         {mode === "auto" ? (
-          <form onSubmit={handleAutoGenerate}>
+          <form onSubmit={handleStartQueue} className="flex flex-wrap items-center gap-2">
             <button
               type="submit"
-              disabled={generating || (selectedCps.length === 0 && !topic.trim())}
+              disabled={
+                runningQueue ||
+                totalRequested <= 0 ||
+                (selectedCps.length === 0 && !topic.trim())
+              }
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white rounded-xl text-sm font-semibold cursor-pointer"
             >
-              {generating ? (
+              {runningQueue ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Sedang Membuat Soal...
+                  <Loader2 className="w-4 h-4 animate-spin" /> Memproses Antrian...
                 </>
               ) : (
                 <>
-                  <Sparkles className="w-4 h-4" /> Generate Soal Sekarang
+                  <Sparkles className="w-4 h-4" /> Generate {totalRequested} Soal
                 </>
               )}
             </button>
+
+            {runningQueue && (
+              <button
+                type="button"
+                onClick={handleCancelQueue}
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-xl text-sm font-semibold cursor-pointer"
+              >
+                <StopCircle className="w-4 h-4" /> Hentikan Antrian
+              </button>
+            )}
           </form>
         ) : (
           <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
             <div className="flex items-center justify-between gap-2">
               <div className="text-xs text-slate-600">
-                <strong>Langkah 1:</strong> Salin prompt (sudah otomatis berisi Mapel, Kelas & CP pilihan Anda) lalu tempel ke ChatGPT / Gemini Web.
+                <strong>Langkah 1:</strong> Salin prompt (sudah otomatis berisi Mapel, Kelas & CP) lalu tempel ke ChatGPT / Gemini Web.
               </div>
               <button
                 type="button"
                 onClick={copyPrompt}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold cursor-pointer shrink-0"
               >
-                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                {copied ? (
+                  <Check className="w-3.5 h-3.5" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
                 {copied ? "Prompt Tersalin!" : "Salin Prompt AI"}
               </button>
             </div>
@@ -671,6 +912,82 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           </div>
         )}
 
+        {/* Panel Status Sistem Antrian */}
+        {queue.length > 0 && (
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-800">
+                Status Antrian Pembuatan Soal ({doneBatches}/{queue.length} gelombang selesai • {results.length} soal terkumpul)
+              </span>
+              <span className="font-bold text-purple-700">{progressPct}%</span>
+            </div>
+
+            <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+              <div
+                className="h-full bg-purple-600 transition-all duration-300"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto">
+              {queue.map((b, idx) => (
+                <div
+                  key={b.id}
+                  className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    {b.status === "running" && (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600 shrink-0" />
+                    )}
+                    {b.status === "done" && (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    )}
+                    {b.status === "queued" && (
+                      <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    )}
+                    {b.status === "error" && (
+                      <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    )}
+                    {b.status === "cancelled" && (
+                      <StopCircle className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    )}
+                    <span className="truncate font-medium text-slate-800">
+                      Antrian #{idx + 1}: {b.label}
+                    </span>
+                  </div>
+                  <div className="shrink-0">
+                    {b.status === "done" && (
+                      <span className="text-emerald-700 font-semibold">
+                        +{b.generatedCount}
+                      </span>
+                    )}
+                    {b.status === "running" && (
+                      <span className="text-purple-700">Proses...</span>
+                    )}
+                    {b.status === "queued" && (
+                      <span className="text-slate-400">Menunggu</span>
+                    )}
+                    {b.status === "cancelled" && (
+                      <span className="text-slate-400">Batal</span>
+                    )}
+                    {b.status === "error" && (
+                      <button
+                        type="button"
+                        disabled={runningQueue}
+                        onClick={() => retryFailedBatch(b.id)}
+                        title={b.errorMsg}
+                        className="inline-flex items-center gap-1 text-rose-700 hover:underline font-semibold cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" /> Ulangi
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs sm:text-sm">
             {error}
@@ -682,19 +999,21 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           <div className="border-t border-slate-200 pt-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="font-bold text-sm text-slate-900">
-                Pratinjau Hasil ({results.length} Soal — {activeSubjectName} Kelas {grade})
+                Pratinjau Hasil ({results.length} Soal — {activeSubjectName} Kelas{" "}
+                {grade})
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
+                  disabled={runningQueue}
                   onClick={exportGeneratedToExcel}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-semibold cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-800 rounded-lg text-xs font-semibold cursor-pointer"
                 >
                   <Download className="w-4 h-4" /> Unduh ke Excel
                 </button>
                 <button
                   type="button"
-                  disabled={saving}
+                  disabled={saving || runningQueue}
                   onClick={saveAllToBank}
                   className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-xs font-semibold cursor-pointer"
                 >
@@ -722,6 +1041,7 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
                     </div>
                     <button
                       type="button"
+                      disabled={runningQueue}
                       onClick={() =>
                         setResults((prev) => prev.filter((_, i) => i !== idx))
                       }
