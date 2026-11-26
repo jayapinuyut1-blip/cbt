@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
-import type { Profile, SchoolClass, SchoolSettings, UserRole } from "@/types/cbt";
+import type {
+  Profile,
+  SchoolClass,
+  SchoolSettings,
+  Subject,
+  UserRole,
+} from "@/types/cbt";
 import {
   Plus,
   Upload,
@@ -15,6 +21,7 @@ import {
   CheckCircle,
   Trash2,
   RefreshCw,
+  BookOpen,
 } from "lucide-react";
 
 export default function AdminPenggunaPage() {
@@ -23,11 +30,18 @@ export default function AdminPenggunaPage() {
   const [kelasFilter, setKelasFilter] = useState<string>("");
   const [users, setUsers] = useState<Profile[]>([]);
   const [classes, setClasses] = useState<SchoolClass[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [teacherSubjects, setTeacherSubjects] = useState<Record<string, number[]>>({});
   const [settings, setSettings] = useState<SchoolSettings>({
     nama_sekolah: "SMK Negeri 3 Kotamobagu",
     logo: "",
     alamat_sekolah: "",
   });
+
+  // Modal Pasangan Mapel Guru
+  const [mapelModalUser, setMapelModalUser] = useState<Profile | null>(null);
+  const [selectedSubjectIds, setSelectedSubjectIds] = useState<number[]>([]);
+  const [savingSubjects, setSavingSubjects] = useState(false);
 
   // Form tambah satuan
   const [username, setUsername] = useState("");
@@ -52,17 +66,29 @@ export default function AdminPenggunaPage() {
   const [syncMessage, setSyncMessage] = useState("");
 
   const loadData = useCallback(async () => {
-    const [{ data: u }, { data: c }, { data: st }] = await Promise.all([
-      supabase
-        .from("profiles")
-        .select("*, classes(id, nama)")
-        .eq("role", roleFilter)
-        .order("nama"),
-      supabase.from("classes").select("*").order("nama"),
-      supabase.from("settings").select("kunci, nilai"),
-    ]);
+    const [{ data: u }, { data: c }, { data: sub }, { data: ts }, { data: st }] =
+      await Promise.all([
+        supabase
+          .from("profiles")
+          .select("*, classes(id, nama)")
+          .eq("role", roleFilter)
+          .order("nama"),
+        supabase.from("classes").select("*").order("nama"),
+        supabase.from("subjects").select("*").order("nama"),
+        supabase.from("teacher_subjects").select("guru_id, subject_id"),
+        supabase.from("settings").select("kunci, nilai"),
+      ]);
     setUsers((u || []) as Profile[]);
     setClasses((c || []) as SchoolClass[]);
+    setSubjects((sub || []) as Subject[]);
+
+    const tsMap: Record<string, number[]> = {};
+    (ts || []).forEach((row) => {
+      if (!tsMap[row.guru_id]) tsMap[row.guru_id] = [];
+      tsMap[row.guru_id].push(row.subject_id);
+    });
+    setTeacherSubjects(tsMap);
+
     const map: Record<string, string> = {};
     (st || []).forEach((r) => (map[r.kunci] = r.nilai));
     setSettings({
@@ -211,6 +237,47 @@ export default function AdminPenggunaPage() {
       alert(d.error || "Gagal menghapus.");
     } else {
       loadData();
+    }
+  }
+
+  function openMapelModal(guru: Profile) {
+    setMapelModalUser(guru);
+    setSelectedSubjectIds(teacherSubjects[guru.id] || []);
+  }
+
+  function toggleSubjectSelection(subjectId: number) {
+    setSelectedSubjectIds((prev) =>
+      prev.includes(subjectId)
+        ? prev.filter((id) => id !== subjectId)
+        : [...prev, subjectId]
+    );
+  }
+
+  async function saveTeacherSubjects() {
+    if (!mapelModalUser) return;
+    setSavingSubjects(true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: mapelModalUser.id,
+          action: "set_subjects",
+          subject_ids: selectedSubjectIds,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(
+          data.error ||
+            "Gagal menyimpan pasangan mapel. Pastikan patch_teacher_subjects.sql sudah dijalankan di Supabase."
+        );
+      } else {
+        setMapelModalUser(null);
+        loadData();
+      }
+    } finally {
+      setSavingSubjects(false);
     }
   }
 
@@ -495,6 +562,9 @@ export default function AdminPenggunaPage() {
               {roleFilter === "siswa" && (
                 <th className="text-left px-4 py-3">Kelas</th>
               )}
+              {roleFilter === "guru" && (
+                <th className="text-left px-4 py-3">Mapel Diampu</th>
+              )}
               <th className="text-left px-4 py-3">Sandi Awal</th>
               <th className="text-left px-4 py-3">Status</th>
               <th className="text-right px-4 py-3">Aksi</th>
@@ -512,6 +582,29 @@ export default function AdminPenggunaPage() {
                 {roleFilter === "siswa" && (
                   <td className="px-4 py-2.5 text-slate-600">
                     {u.classes?.nama || "-"}
+                  </td>
+                )}
+                {roleFilter === "guru" && (
+                  <td className="px-4 py-2.5">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {(teacherSubjects[u.id] || []).length > 0 ? (
+                        (teacherSubjects[u.id] || []).map((sid) => {
+                          const subj = subjects.find((s) => s.id === sid);
+                          return (
+                            <span
+                              key={sid}
+                              className="px-2 py-0.5 text-xs rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200"
+                            >
+                              {subj?.nama || `#${sid}`}
+                            </span>
+                          );
+                        })
+                      ) : (
+                        <span className="text-xs text-amber-600 italic">
+                          Belum diatur
+                        </span>
+                      )}
+                    </div>
                   </td>
                 )}
                 <td className="px-4 py-2.5 font-mono text-xs text-slate-600">
@@ -544,6 +637,15 @@ export default function AdminPenggunaPage() {
                 </td>
                 <td className="px-4 py-2.5">
                   <div className="flex items-center justify-end gap-1">
+                    {roleFilter === "guru" && (
+                      <button
+                        onClick={() => openMapelModal(u)}
+                        title="Atur Pasangan Mapel Guru"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-medium cursor-pointer"
+                      >
+                        <BookOpen className="w-3.5 h-3.5" /> Mapel
+                      </button>
+                    )}
                     <button
                       onClick={() => userAction(u.id, "reset_login")}
                       title="Reset Login (Izinkan login ulang di perangkat baru)"
@@ -586,7 +688,7 @@ export default function AdminPenggunaPage() {
             ))}
             {filteredUsers.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                   Belum ada data {roleFilter}.
                 </td>
               </tr>
@@ -594,6 +696,85 @@ export default function AdminPenggunaPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Modal Atur Pasangan Mapel Guru */}
+      {mapelModalUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-bold text-lg text-slate-900">
+                  Atur Mapel Diampu
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Guru: <strong>{mapelModalUser.nama}</strong> ({mapelModalUser.username})
+                </p>
+              </div>
+              <button
+                onClick={() => setMapelModalUser(null)}
+                className="text-sm text-slate-500 hover:text-slate-900 cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Centang mata pelajaran yang diampu guru ini. Setelah login, guru hanya dapat melihat bank soal, ujian, koreksi essay, dan nilai untuk mapel yang dipilih.
+            </p>
+
+            <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+              {subjects.map((subj) => {
+                const checked = selectedSubjectIds.includes(subj.id);
+                return (
+                  <label
+                    key={subj.id}
+                    className={`flex items-center gap-3 px-3.5 py-2.5 text-sm cursor-pointer ${
+                      checked ? "bg-indigo-50/60" : "hover:bg-slate-50"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleSubjectSelection(subj.id)}
+                    />
+                    <span className="font-medium text-slate-800">
+                      {subj.nama}
+                    </span>
+                  </label>
+                );
+              })}
+              {subjects.length === 0 && (
+                <div className="p-4 text-center text-xs text-slate-400">
+                  Belum ada mata pelajaran. Tambahkan di menu Kelas, Mapel & TA.
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-xs text-slate-500">
+                {selectedSubjectIds.length} mapel dipilih
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMapelModalUser(null)}
+                  className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={savingSubjects}
+                  onClick={saveTeacherSubjects}
+                  className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-sm font-semibold cursor-pointer"
+                >
+                  {savingSubjects ? "Menyimpan..." : "Simpan Mapel"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Sinkronisasi dari SMK3 Absensi */}
       {showSyncModal && (

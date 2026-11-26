@@ -152,6 +152,12 @@ export async function POST(request: Request) {
         .upsert({ nama: subName }, { onConflict: "nama", ignoreDuplicates: true });
       if (!error) subjectsAdded++;
     }
+    const { data: allCbtSubjects } = await cbtAdmin
+      .from("subjects")
+      .select("id, nama");
+    const subjectNameToId = new Map<string, number>(
+      (allCbtSubjects || []).map((s) => [s.nama.trim().toLowerCase(), s.id])
+    );
 
     // 5. Kumpulkan Username CBT yang sudah ada
     const { data: existingProfiles } = await cbtAdmin
@@ -218,6 +224,17 @@ export async function POST(request: Request) {
           await cbtAdmin.auth.admin.deleteUser(created.user.id);
           errors.push(`Guru ${cleanUser}: ${insErr.message}`);
           continue;
+        }
+        if (t?.subject) {
+          const matchedSubId = subjectNameToId.get(t.subject.trim().toLowerCase());
+          if (matchedSubId) {
+            await cbtAdmin
+              .from("teacher_subjects")
+              .upsert(
+                { guru_id: created.user.id, subject_id: matchedSubId },
+                { onConflict: "guru_id,subject_id", ignoreDuplicates: true }
+              );
+          }
         }
         existingUsernames.add(cleanUser.toLowerCase());
         teachersCreated++;

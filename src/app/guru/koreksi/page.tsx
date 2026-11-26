@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
+import { fetchAllowedSubjectsForCurrentUser } from "@/lib/teacher-subjects";
 import type { Exam } from "@/types/cbt";
 import { CheckCircle2, FileSpreadsheet, PenTool } from "lucide-react";
 
@@ -53,15 +54,22 @@ export default function GuruKoreksiPage() {
   const [gradeRows, setGradeRows] = useState<GradeRow[]>([]);
 
   useEffect(() => {
-    supabase
-      .from("exams")
-      .select("*, subjects(id, nama)")
-      .order("id", { ascending: false })
-      .then(({ data }) => {
-        const list = (data || []) as Exam[];
-        setExams(list);
-        if (list[0]) setSelectedExamId(String(list[0].id));
-      });
+    fetchAllowedSubjectsForCurrentUser(supabase).then(async ({ subjects: allowedSub }) => {
+      const allowedIds = allowedSub.map((s) => s.id);
+      if (allowedIds.length === 0) {
+        setExams([]);
+        setSelectedExamId("");
+        return;
+      }
+      const { data } = await supabase
+        .from("exams")
+        .select("*, subjects(id, nama)")
+        .in("subject_id", allowedIds)
+        .order("id", { ascending: false });
+      const list = (data || []) as Exam[];
+      setExams(list);
+      if (list[0]) setSelectedExamId(String(list[0].id));
+    });
   }, [supabase]);
 
   const loadData = useCallback(async () => {

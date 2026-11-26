@@ -48,6 +48,13 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now()
 );
 
+-- Relasi Pasangan Mata Pelajaran per Guru
+create table if not exists public.teacher_subjects (
+  guru_id uuid not null references public.profiles(id) on delete cascade,
+  subject_id bigint not null references public.subjects(id) on delete cascade,
+  primary key (guru_id, subject_id)
+);
+
 -- Bank Soal
 create table if not exists public.questions (
   id bigint generated always as identity primary key,
@@ -167,6 +174,8 @@ create table if not exists public.settings (
 -- Indeks Performa
 create index if not exists idx_profiles_role on public.profiles(role);
 create index if not exists idx_profiles_kelas on public.profiles(kelas_id);
+create index if not exists idx_teacher_subjects_guru on public.teacher_subjects(guru_id);
+create index if not exists idx_teacher_subjects_subject on public.teacher_subjects(subject_id);
 create index if not exists idx_questions_subject on public.questions(subject_id);
 create index if not exists idx_question_options_question on public.question_options(question_id);
 create index if not exists idx_exam_schedules_kelas on public.exam_schedules(kelas_id);
@@ -240,6 +249,19 @@ as $$
   select coalesce((select role in ('admin', 'guru') from public.profiles where id = auth.uid()), false);
 $$;
 
+create or replace function public.can_access_subject(p_subject_id bigint)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.is_admin() or exists (
+    select 1 from public.teacher_subjects
+    where guru_id = auth.uid() and subject_id = p_subject_id
+  );
+$$;
+
 -- ============================================================================
 -- 4. ROW LEVEL SECURITY (RLS)
 -- Siswa TIDAK PERNAH bisa SELECT langsung ke tabel questions / question_options
@@ -250,6 +272,7 @@ alter table public.academic_years enable row level security;
 alter table public.classes enable row level security;
 alter table public.subjects enable row level security;
 alter table public.profiles enable row level security;
+alter table public.teacher_subjects enable row level security;
 alter table public.questions enable row level security;
 alter table public.question_options enable row level security;
 alter table public.exams enable row level security;
@@ -291,23 +314,53 @@ drop policy if exists "profiles_admin_all" on public.profiles;
 create policy "profiles_admin_all" on public.profiles for all
   using (public.is_admin()) with check (public.is_admin());
 
--- questions & question_options: HANYA guru & admin! Siswa DILARANG baca langsung!
+-- teacher_subjects: guru baca miliknya, admin kelola semua
+drop policy if exists "teacher_subjects_select" on public.teacher_subjects;
+create policy "teacher_subjects_select" on public.teacher_subjects for select
+  using (guru_id = auth.uid() or public.is_admin());
+drop policy if exists "teacher_subjects_admin_all" on public.teacher_subjects;
+create policy "teacher_subjects_admin_all" on public.teacher_subjects for all
+  using (public.is_admin()) with check (public.is_admin());
+
+-- questions & question_options: HANYA admin atau guru pengampu mapel! Siswa DILARANG baca langsung!
 drop policy if exists "questions_guru_admin" on public.questions;
 create policy "questions_guru_admin" on public.questions for all
-  using (public.is_guru_or_admin()) with check (public.is_guru_or_admin());
+  using (public.can_access_subject(subject_id)) with check (public.can_access_subject(subject_id));
 
 drop policy if exists "question_options_guru_admin" on public.question_options;
 create policy "question_options_guru_admin" on public.question_options for all
-  using (public.is_guru_or_admin()) with check (public.is_guru_or_admin());
+  using (
+    exists (
+      select 1 from public.questions q
+      where q.id = question_id and public.can_access_subject(q.subject_id)
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.questions q
+      where q.id = question_id and public.can_access_subject(q.subject_id)
+    )
+  );
 
--- exams & exam_questions: guru & admin penuh; siswa TIDAK baca token langsung
+-- exams & exam_questions: admin atau guru pengampu mapel
 drop policy if exists "exams_guru_admin" on public.exams;
 create policy "exams_guru_admin" on public.exams for all
-  using (public.is_guru_or_admin()) with check (public.is_guru_or_admin());
+  using (public.can_access_subject(subject_id)) with check (public.can_access_subject(subject_id));
 
 drop policy if exists "exam_questions_guru_admin" on public.exam_questions;
 create policy "exam_questions_guru_admin" on public.exam_questions for all
-  using (public.is_guru_or_admin()) with check (public.is_guru_or_admin());
+  using (
+    exists (
+      select 1 from public.exams e
+      where e.id = exam_id and public.can_access_subject(e.subject_id)
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.exams e
+      where e.id = exam_id and public.can_access_subject(e.subject_id)
+    )
+  );
 
 -- exam_schedules & exam_overrides: guru & admin kelola/baca
 drop policy if exists "exam_schedules_guru_admin" on public.exam_schedules;
@@ -320,18 +373,55 @@ create policy "exam_overrides_guru_admin" on public.exam_overrides for select us
 drop policy if exists "exam_overrides_admin_write" on public.exam_overrides;
 create policy "exam_overrides_admin_write" on public.exam_overrides for all using (public.is_admin()) with check (public.is_admin());
 
--- attempts, answers, attempt_logs: guru & admin bisa baca/update koreksi; siswa hanya lewat RPC
+-- attempts, answers, attempt_logs: admin atau guru pengampu mapel; siswa hanya lewat RPC
 drop policy if exists "attempts_guru_admin" on public.attempts;
 create policy "attempts_guru_admin" on public.attempts for all
-  using (public.is_guru_or_admin()) with check (public.is_guru_or_admin());
+  using (
+    exists (
+      select 1 from public.exams e
+      where e.id = exam_id and public.can_access_subject(e.subject_id)
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.exams e
+      where e.id = exam_id and public.can_access_subject(e.subject_id)
+    )
+  );
 
 drop policy if exists "answers_guru_admin" on public.answers;
 create policy "answers_guru_admin" on public.answers for all
-  using (public.is_guru_or_admin()) with check (public.is_guru_or_admin());
+  using (
+    exists (
+      select 1 from public.attempts a
+      join public.exams e on e.id = a.exam_id
+      where a.id = attempt_id and public.can_access_subject(e.subject_id)
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.attempts a
+      join public.exams e on e.id = a.exam_id
+      where a.id = attempt_id and public.can_access_subject(e.subject_id)
+    )
+  );
 
 drop policy if exists "attempt_logs_guru_admin" on public.attempt_logs;
 create policy "attempt_logs_guru_admin" on public.attempt_logs for all
-  using (public.is_guru_or_admin()) with check (public.is_guru_or_admin());
+  using (
+    exists (
+      select 1 from public.attempts a
+      join public.exams e on e.id = a.exam_id
+      where a.id = attempt_id and public.can_access_subject(e.subject_id)
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.attempts a
+      join public.exams e on e.id = a.exam_id
+      where a.id = attempt_id and public.can_access_subject(e.subject_id)
+    )
+  );
 
 -- ============================================================================
 -- 5. RPC FUNCTIONS (Logika Ujian Server-Side di PostgreSQL)
@@ -1080,6 +1170,9 @@ begin
   select * into v_exam from public.exams where id = p_exam_id;
   if not found then
     raise exception 'Ujian tidak ditemukan';
+  end if;
+  if not public.can_access_subject(v_exam.subject_id) then
+    raise exception 'Anda tidak memiliki akses ke mata pelajaran ujian ini';
   end if;
   select nama into v_mapel from public.subjects where id = v_exam.subject_id;
 

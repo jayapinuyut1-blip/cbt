@@ -8,6 +8,7 @@ const BACKUP_TABLES = [
   "classes",
   "subjects",
   "profiles",
+  "teacher_subjects",
   "questions",
   "question_options",
   "exams",

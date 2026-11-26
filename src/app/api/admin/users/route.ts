@@ -24,6 +24,7 @@ export async function POST(request: Request) {
       nama: string;
       role: "admin" | "guru" | "siswa";
       kelas_id?: number | null;
+      subject_ids?: number[];
       password?: string;
     }> = Array.isArray(body.users) ? body.users : [body];
 
@@ -75,6 +76,15 @@ export async function POST(request: Request) {
         await admin.auth.admin.deleteUser(authData.user.id);
         errors.push({ username, reason: profErr.message });
         continue;
+      }
+
+      if (role === "guru" && Array.isArray(item.subject_ids) && item.subject_ids.length > 0) {
+        await admin.from("teacher_subjects").insert(
+          item.subject_ids.map((sid) => ({
+            guru_id: authData.user.id,
+            subject_id: Number(sid),
+          }))
+        );
       }
 
       created.push({ username, nama, password: rawPassword });
@@ -139,6 +149,30 @@ export async function PATCH(request: Request) {
         .from("profiles")
         .update({ active_session_id: null })
         .eq("id", id);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === "set_subjects") {
+      const subjectIds: number[] = Array.isArray(body.subject_ids)
+        ? body.subject_ids.map((x: unknown) => Number(x)).filter((n: number) => Number.isFinite(n) && n > 0)
+        : [];
+
+      const { error: delErr } = await admin
+        .from("teacher_subjects")
+        .delete()
+        .eq("guru_id", id);
+      if (delErr) {
+        return NextResponse.json({ error: delErr.message }, { status: 400 });
+      }
+
+      if (subjectIds.length > 0) {
+        const { error: insErr } = await admin.from("teacher_subjects").insert(
+          subjectIds.map((subject_id) => ({ guru_id: id, subject_id }))
+        );
+        if (insErr) {
+          return NextResponse.json({ error: insErr.message }, { status: 400 });
+        }
+      }
       return NextResponse.json({ ok: true });
     }
 

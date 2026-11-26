@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { generateExamToken } from "@/lib/auth-utils";
 import { questionTypeLabel } from "@/lib/format";
+import { fetchAllowedSubjectsForCurrentUser } from "@/lib/teacher-subjects";
 import type {
   AcademicYear,
   Exam,
@@ -48,22 +49,29 @@ export default function GuruUjianPage() {
   const [saving, setSaving] = useState(false);
 
   const loadAll = useCallback(async () => {
-    const [{ data: u }, { data: ex }, { data: sub }, { data: yr }] =
+    const [{ userId: uid, subjects: allowedSub }, { data: yr }] =
       await Promise.all([
-        supabase.auth.getUser(),
-        supabase
-          .from("exams")
-          .select("*, subjects(id, nama)")
-          .order("id", { ascending: false }),
-        supabase.from("subjects").select("*").order("nama"),
+        fetchAllowedSubjectsForCurrentUser(supabase),
         supabase
           .from("academic_years")
           .select("*")
           .order("id", { ascending: false }),
       ]);
-    setUserId(u.user?.id || null);
-    setExams((ex || []) as Exam[]);
-    setSubjects((sub || []) as Subject[]);
+    setUserId(uid);
+    setSubjects(allowedSub);
+
+    const allowedIds = allowedSub.map((s) => s.id);
+    if (allowedIds.length > 0) {
+      const { data: ex } = await supabase
+        .from("exams")
+        .select("*, subjects(id, nama)")
+        .in("subject_id", allowedIds)
+        .order("id", { ascending: false });
+      setExams((ex || []) as Exam[]);
+    } else {
+      setExams([]);
+    }
+
     const yList = (yr || []) as AcademicYear[];
     setYears(yList);
     const activeYr = yList.find((y) => y.aktif);

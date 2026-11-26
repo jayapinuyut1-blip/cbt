@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import { compressImageFile } from "@/lib/image";
 import { questionTypeLabel } from "@/lib/format";
+import { fetchAllowedSubjectsForCurrentUser } from "@/lib/teacher-subjects";
 import type { Question, QuestionType, Subject } from "@/types/cbt";
 import {
   Plus,
@@ -51,16 +52,11 @@ export default function GuruBankSoalPage() {
   const [importing, setImporting] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id || null));
-    supabase
-      .from("subjects")
-      .select("*")
-      .order("nama")
-      .then(({ data }) => {
-        const list = (data || []) as Subject[];
-        setSubjects(list);
-        if (list[0]) setSelectedSubjectId(String(list[0].id));
-      });
+    fetchAllowedSubjectsForCurrentUser(supabase).then(({ userId: uid, subjects: list }) => {
+      setUserId(uid);
+      setSubjects(list);
+      if (list[0]) setSelectedSubjectId(String(list[0].id));
+    });
   }, [supabase]);
 
   const loadQuestions = useCallback(async () => {
