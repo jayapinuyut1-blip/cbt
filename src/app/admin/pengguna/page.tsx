@@ -14,6 +14,7 @@ import {
   Ban,
   CheckCircle,
   Trash2,
+  RefreshCw,
 } from "lucide-react";
 
 export default function AdminPenggunaPage() {
@@ -40,6 +41,15 @@ export default function AdminPenggunaPage() {
 
   // Mode cetak kartu login
   const [printMode, setPrintMode] = useState(false);
+
+  // Sinkronisasi dari SMK3 Absensi
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [syncAuthMode, setSyncAuthMode] = useState<"login" | "secret">("login");
+  const [absensiEmail, setAbsensiEmail] = useState("");
+  const [absensiPassword, setAbsensiPassword] = useState("");
+  const [absensiSecretKey, setAbsensiSecretKey] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
 
   const loadData = useCallback(async () => {
     const [{ data: u }, { data: c }, { data: st }] = await Promise.all([
@@ -204,6 +214,36 @@ export default function AdminPenggunaPage() {
     }
   }
 
+  async function handleSyncAbsensi(e: React.FormEvent) {
+    e.preventDefault();
+    setSyncing(true);
+    setSyncMessage("");
+    try {
+      const payload =
+        syncAuthMode === "secret"
+          ? { secretKey: absensiSecretKey }
+          : { adminEmail: absensiEmail, adminPassword: absensiPassword };
+      const res = await fetch("/api/admin/sync-absensi", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSyncMessage(`Gagal: ${data.error || "Kesalahan sinkronisasi."}`);
+      } else {
+        setSyncMessage(
+          `Sinkronisasi selesai! Kelas baru: ${data.classesAdded} (total ${data.totalClassesFound}), Guru baru: ${data.teachersCreated} (lewati: ${data.teachersSkipped}), Siswa baru: ${data.studentsCreated} (lewati: ${data.studentsSkipped}).`
+        );
+        loadData();
+      }
+    } catch {
+      setSyncMessage("Gagal menghubungi server.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   // Tampilan Cetak Kartu Login
   if (printMode) {
     return (
@@ -298,12 +338,23 @@ export default function AdminPenggunaPage() {
             Tambah manual atau impor dari Excel, kata sandi awal dibuat otomatis dan kartu login dapat dicetak.
           </p>
         </div>
-        <button
-          onClick={() => setPrintMode(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium cursor-pointer"
-        >
-          <Printer className="w-4 h-4" /> Cetak Kartu Login
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => {
+              setSyncMessage("");
+              setShowSyncModal(true);
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium cursor-pointer"
+          >
+            <RefreshCw className="w-4 h-4" /> Tarik Data dari SMK3 Absensi
+          </button>
+          <button
+            onClick={() => setPrintMode(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium cursor-pointer"
+          >
+            <Printer className="w-4 h-4" /> Cetak Kartu Login
+          </button>
+        </div>
       </div>
 
       {/* Tabs Role & Filter Kelas */}
@@ -543,6 +594,120 @@ export default function AdminPenggunaPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Modal Sinkronisasi dari SMK3 Absensi */}
+      {showSyncModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-lg text-slate-900">
+                Tarik Data dari SMK3 Absensi
+              </h2>
+              <button
+                onClick={() => setShowSyncModal(false)}
+                className="text-sm text-slate-500 hover:text-slate-900 cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
+            <p className="text-xs text-slate-500">
+              Otomatis menyinkronkan <strong>Kelas</strong>, <strong>Guru</strong>, dan{" "}
+              <strong>Siswa</strong> (beserta kelasnya) dari database SMK3 Absensi, sekaligus membuatkan sandi awal siap cetak di Kartu Login.
+            </p>
+
+            <div className="flex gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setSyncAuthMode("login")}
+                className={`flex-1 py-2 rounded-lg font-medium cursor-pointer ${
+                  syncAuthMode === "login"
+                    ? "bg-indigo-600 text-white"
+                    : "bg-slate-100 text-slate-700"
+                }`}
+              >
+                Login Admin Absensi
+              </button>
+              <button
+                type="button"
+                onClick={() => setSyncAuthMode("secret")}
+                className={`flex-1 py-2 rounded-lg font-medium cursor-pointer ${
+                  syncAuthMode === "secret"
+                    ? "bg-indigo-600 text-white"
+                    : "bg-slate-100 text-slate-700"
+                }`}
+              >
+                Secret Key Supabase
+              </button>
+            </div>
+
+            <form onSubmit={handleSyncAbsensi} className="space-y-3">
+              {syncAuthMode === "login" ? (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Email Admin SMK3 Absensi
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={absensiEmail}
+                      onChange={(e) => setAbsensiEmail(e.target.value)}
+                      placeholder="admin@smkn3..."
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Password Admin SMK3 Absensi
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={absensiPassword}
+                      onChange={(e) => setAbsensiPassword(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Secret / Service Role Key Supabase Absensi
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    value={absensiSecretKey}
+                    onChange={(e) => setAbsensiSecretKey(e.target.value)}
+                    placeholder="sb_secret_... atau eyJhbGci..."
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                  />
+                </div>
+              )}
+
+              {syncMessage && (
+                <div
+                  className={`p-3 rounded-lg text-xs border ${
+                    syncMessage.startsWith("Gagal")
+                      ? "bg-red-50 border-red-200 text-red-700"
+                      : "bg-emerald-50 border-emerald-200 text-emerald-800"
+                  }`}
+                >
+                  {syncMessage}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={syncing}
+                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg text-sm font-semibold cursor-pointer"
+              >
+                {syncing ? "Menarik Data..." : "Mulai Sinkronisasi Sekarang"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
