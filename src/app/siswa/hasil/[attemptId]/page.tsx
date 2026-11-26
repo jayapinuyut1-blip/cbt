@@ -29,6 +29,8 @@ interface ResultDetail {
 
 interface ResultPayload {
   attempt_id: number;
+  attempt_ke?: number;
+  is_remedial?: boolean;
   status: string;
   mulai: string;
   selesai: string | null;
@@ -39,6 +41,7 @@ interface ResultPayload {
     kkm: number;
     jenis: string;
     tampil_hasil: string;
+    aturan_remedial?: string;
   };
   show_score: boolean;
   show_key: boolean;
@@ -107,7 +110,9 @@ export default function SiswaHasilPage() {
 
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
-            Ujian Telah Dikumpulkan
+            {result.is_remedial
+              ? `Ujian Remedial #${Math.max(1, (result.attempt_ke || 2) - 1)} Dikumpulkan`
+              : "Ujian Telah Dikumpulkan"}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             {result.exam.judul} — {result.exam.mapel}

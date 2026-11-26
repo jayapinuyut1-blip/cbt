@@ -14,12 +14,16 @@ import {
   AlertTriangle,
   RefreshCw,
   Unlock,
+  Trash2,
+  Users,
 } from "lucide-react";
 
 interface AttemptRow {
   id: number;
   exam_id: number;
   student_id: string;
+  attempt_ke?: number;
+  is_remedial?: boolean;
   mulai: string;
   selesai: string | null;
   status: "mengerjakan" | "menunggu_koreksi" | "selesai";
@@ -56,7 +60,10 @@ export default function AdminMonitoringPage() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from("exams").select("*, subjects(id, nama)").order("id", { ascending: false }),
+      supabase
+        .from("exams")
+        .select("*, subjects(id, nama)")
+        .order("id", { ascending: false }),
       supabase.from("classes").select("*").order("nama"),
     ]).then(([{ data: ex }, { data: cl }]) => {
       const exList = (ex || []) as Exam[];
@@ -86,7 +93,8 @@ export default function AdminMonitoringPage() {
         supabase
           .from("attempts")
           .select("*")
-          .eq("exam_id", Number(selectedExamId)),
+          .eq("exam_id", Number(selectedExamId))
+          .order("id", { ascending: true }),
       ]);
 
       const attList = (att || []) as AttemptRow[];
@@ -166,7 +174,11 @@ export default function AdminMonitoringPage() {
     };
   }, [supabase, selectedExamId, loadMonitoring]);
 
-  async function doAction(payload: Record<string, unknown>, confirmMsg?: string) {
+  async function doAction(
+    payload: Record<string, unknown>,
+    confirmMsg?: string,
+    successMsg?: string
+  ) {
     if (confirmMsg && !confirm(confirmMsg)) return;
     const res = await fetch("/api/admin/monitoring", {
       method: "POST",
@@ -175,19 +187,30 @@ export default function AdminMonitoringPage() {
     });
     const data = await res.json();
     if (!res.ok) alert(data.error || "Gagal memproses aksi.");
-    else loadMonitoring();
+    else {
+      if (successMsg) alert(successMsg);
+      loadMonitoring();
+    }
   }
 
-  const attemptByStudent = new Map(attempts.map((a) => [a.student_id, a]));
+  // Ambil percobaan TERBARU per siswa (termasuk bila sedang/sudah remedial)
+  const latestAttemptByStudent = new Map<string, AttemptRow>();
+  for (const a of attempts) {
+    const prev = latestAttemptByStudent.get(a.student_id);
+    if (!prev || (a.attempt_ke || 1) >= (prev.attempt_ke || 1)) {
+      latestAttemptByStudent.set(a.student_id, a);
+    }
+  }
+
   const selectedExam = exams.find((e) => String(e.id) === selectedExamId);
 
   const summary = {
-    belum: students.filter((s) => !attemptByStudent.has(s.id)).length,
+    belum: students.filter((s) => !latestAttemptByStudent.has(s.id)).length,
     mengerjakan: students.filter(
-      (s) => attemptByStudent.get(s.id)?.status === "mengerjakan"
+      (s) => latestAttemptByStudent.get(s.id)?.status === "mengerjakan"
     ).length,
     selesai: students.filter((s) => {
-      const st = attemptByStudent.get(s.id)?.status;
+      const st = latestAttemptByStudent.get(s.id)?.status;
       return st === "selesai" || st === "menunggu_koreksi";
     }).length,
   };
@@ -201,16 +224,35 @@ export default function AdminMonitoringPage() {
             Monitoring Ujian Real-time
           </h1>
           <p className="text-sm text-slate-500">
-            Pembaruan otomatis saat siswa menjawab, selesai, berpindah tab, atau keluar layar penuh.
+            Pantau peserta langsung, reset login (ganti perangkat tanpa kehilangan jawaban), tambah waktu, atau reset ulang dari nol.
           </p>
         </div>
-        <button
-          onClick={loadMonitoring}
-          className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-sm font-medium cursor-pointer"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          Muat Ulang
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() =>
+              doAction(
+                {
+                  action: "reset_login_bulk",
+                  student_ids: students.map((s) => s.id),
+                },
+                `Reset login untuk SEMUA ${students.length} siswa yang tampil di daftar ini? (Jawaban & sisa waktu tetap aman, siswa bisa langsung login ulang di perangkat baru)`,
+                `Berhasil mereset sesi login untuk ${students.length} siswa.`
+              )
+            }
+            disabled={students.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white rounded-lg text-sm font-medium cursor-pointer"
+          >
+            <Users className="w-4 h-4" />
+            Reset Login Massal ({students.length})
+          </button>
+          <button
+            onClick={loadMonitoring}
+            className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-sm font-medium cursor-pointer"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            Muat Ulang
+          </button>
+        </div>
       </div>
 
       {/* Filter */}
@@ -259,12 +301,26 @@ export default function AdminMonitoringPage() {
         </div>
         <div className="bg-white rounded-xl border border-amber-200 p-4">
           <div className="text-xs text-amber-700">Sedang Mengerjakan</div>
-          <div className="text-2xl font-bold text-amber-700">{summary.mengerjakan}</div>
+          <div className="text-2xl font-bold text-amber-700">
+            {summary.mengerjakan}
+          </div>
         </div>
         <div className="bg-white rounded-xl border border-emerald-200 p-4">
           <div className="text-xs text-emerald-700">Selesai</div>
-          <div className="text-2xl font-bold text-emerald-700">{summary.selesai}</div>
+          <div className="text-2xl font-bold text-emerald-700">
+            {summary.selesai}
+          </div>
         </div>
+      </div>
+
+      {/* Keterangan Perbedaan Reset */}
+      <div className="bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-xs text-slate-600 flex flex-wrap gap-x-6 gap-y-1">
+        <span>
+          <strong className="text-blue-700">Reset Login:</strong> Buka kunci perangkat jika HP/PC hang (jawaban & sisa waktu <u>tetap aman</u>).
+        </span>
+        <span>
+          <strong className="text-rose-700">Reset Ulang:</strong> Hapus percobaan & jawaban siswa agar mengulang dari awal.
+        </span>
       </div>
 
       {/* Tabel Peserta */}
@@ -275,14 +331,14 @@ export default function AdminMonitoringPage() {
               <th className="text-left px-4 py-3">Peserta</th>
               <th className="text-left px-4 py-3">Status</th>
               <th className="text-left px-4 py-3">Terjawab</th>
-              <th className="text-left px-4 py-3">Terakhir Aktif</th>
-              <th className="text-left px-4 py-3">Log Aktivitas</th>
-              <th className="text-right px-4 py-3">Tindakan</th>
+              <th className="text-left px-4 py-3">Aktif</th>
+              <th className="text-left px-4 py-3">Log</th>
+              <th className="text-right px-4 py-3">Tindakan Pengawas</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {students.map((st) => {
-              const att = attemptByStudent.get(st.id);
+              const att = latestAttemptByStudent.get(st.id);
               const totalQ = Array.isArray(att?.question_order)
                 ? att.question_order.length
                 : 0;
@@ -291,7 +347,8 @@ export default function AdminMonitoringPage() {
                 ? logs.filter((l) => l.attempt_id === att.id)
                 : [];
               const warnCount = attLogs.filter(
-                (l) => l.jenis === "pindah_tab" || l.jenis === "keluar_layar_penuh"
+                (l) =>
+                  l.jenis === "pindah_tab" || l.jenis === "keluar_layar_penuh"
               ).length;
 
               return (
@@ -308,24 +365,33 @@ export default function AdminMonitoringPage() {
                     </div>
                   </td>
                   <td className="px-4 py-2.5">
-                    {!att ? (
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-600">
-                        Belum Mulai
-                      </span>
-                    ) : att.status === "mengerjakan" ? (
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-800 font-medium">
-                        Mengerjakan
-                        {att.extra_minutes > 0 ? ` (+${att.extra_minutes}m)` : ""}
-                      </span>
-                    ) : att.status === "menunggu_koreksi" ? (
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-indigo-100 text-indigo-800">
-                        Menunggu Koreksi
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-100 text-emerald-800 font-medium">
-                        Selesai ({att.nilai ?? "-"})
-                      </span>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1">
+                      {att && (att.attempt_ke || 1) > 1 && (
+                        <span className="px-1.5 py-0.5 text-[11px] rounded bg-purple-100 text-purple-800 font-semibold">
+                          Remedial #{(att.attempt_ke || 2) - 1}
+                        </span>
+                      )}
+                      {!att ? (
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-600">
+                          Belum Mulai
+                        </span>
+                      ) : att.status === "mengerjakan" ? (
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-800 font-medium">
+                          Mengerjakan
+                          {att.extra_minutes > 0
+                            ? ` (+${att.extra_minutes}m)`
+                            : ""}
+                        </span>
+                      ) : att.status === "menunggu_koreksi" ? (
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-indigo-100 text-indigo-800">
+                          Menunggu Koreksi
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-100 text-emerald-800 font-medium">
+                          Selesai ({att.nilai ?? "-"})
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-2.5 font-mono text-xs">
                     {att ? `${answered} / ${totalQ}` : "-"}
@@ -342,26 +408,30 @@ export default function AdminMonitoringPage() {
                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-xs font-medium cursor-pointer"
                       >
                         <AlertTriangle className="w-3.5 h-3.5" />
-                        {warnCount} peringatan
+                        {warnCount}x
                       </button>
                     ) : (
                       <span className="text-xs text-slate-400">Normal</span>
                     )}
                   </td>
                   <td className="px-4 py-2.5">
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="flex flex-wrap items-center justify-end gap-1">
                       <button
                         onClick={() =>
-                          doAction({
-                            action: "reset_login",
-                            student_id: st.id,
-                            attempt_id: att?.id,
-                          })
+                          doAction(
+                            {
+                              action: "reset_login",
+                              student_id: st.id,
+                              attempt_id: att?.id,
+                            },
+                            undefined,
+                            `Sesi login ${st.nama} berhasil direset.`
+                          )
                         }
-                        title="Reset Login"
-                        className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 cursor-pointer"
+                        title="Reset Login (Izinkan ganti HP/PC tanpa hapus jawaban)"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-medium cursor-pointer"
                       >
-                        <RotateCcw className="w-4 h-4" />
+                        <RotateCcw className="w-3.5 h-3.5" /> Reset Login
                       </button>
 
                       {att && att.status === "mengerjakan" && (
@@ -377,10 +447,9 @@ export default function AdminMonitoringPage() {
                                 });
                               }
                             }}
-                            title="Tambah Waktu"
-                            className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 cursor-pointer"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 text-amber-800 hover:bg-amber-100 text-xs font-medium cursor-pointer"
                           >
-                            <Clock className="w-4 h-4" />
+                            <Clock className="w-3.5 h-3.5" /> +Waktu
                           </button>
                           <button
                             onClick={() =>
@@ -389,10 +458,9 @@ export default function AdminMonitoringPage() {
                                 `Paksa selesai ujian untuk ${st.nama}?`
                               )
                             }
-                            title="Paksa Selesai"
-                            className="p-1.5 rounded-lg text-emerald-700 hover:bg-emerald-50 cursor-pointer"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-xs font-medium cursor-pointer"
                           >
-                            <CheckSquare className="w-4 h-4" />
+                            <CheckSquare className="w-3.5 h-3.5" /> Selesai
                           </button>
                         </>
                       )}
@@ -412,10 +480,29 @@ export default function AdminMonitoringPage() {
                               });
                             }
                           }}
-                          title="Buka Kembali Ujian (Susulan)"
-                          className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-medium cursor-pointer"
                         >
-                          <Unlock className="w-4 h-4" />
+                          <Unlock className="w-3.5 h-3.5" /> Buka Lagi
+                        </button>
+                      )}
+
+                      {att && (
+                        <button
+                          onClick={() =>
+                            doAction(
+                              {
+                                action: "reset_attempt_total",
+                                attempt_id: att.id,
+                                student_id: st.id,
+                              },
+                              `PERINGATAN: Hapus percobaan & seluruh jawaban ${st.nama} pada percobaan ini agar siswa mengulang dari NOL?`,
+                              `Percobaan ${st.nama} berhasil direset ulang dari nol.`
+                            )
+                          }
+                          title="Reset Ulang dari Nol (Hapus jawaban percobaan ini)"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-medium cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Reset Ulang
                         </button>
                       )}
 

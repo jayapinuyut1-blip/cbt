@@ -1,26 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateTime } from "@/lib/format";
+import {
+  aggregateGradesByStudent,
+  remedialRuleLabel,
+  type RawStudentAttempt,
+  type RemedialRule,
+} from "@/lib/remedial";
+import RemedialModal from "@/components/RemedialModal";
 import type { AcademicYear, Exam, SchoolClass } from "@/types/cbt";
-import { Download, FileSpreadsheet, Database } from "lucide-react";
-
-interface ScoreRow {
-  id: number;
-  status: string;
-  nilai: number | null;
-  nilai_sementara: number | null;
-  mulai: string;
-  selesai: string | null;
-  profiles: {
-    username: string;
-    nama: string;
-    kelas_id: number | null;
-    classes: { nama: string } | null;
-  } | null;
-}
+import { Download, FileSpreadsheet, Database, RotateCcw } from "lucide-react";
 
 export default function AdminNilaiPage() {
   const supabase = createClient();
@@ -30,21 +22,33 @@ export default function AdminNilaiPage() {
   const [selectedYearId, setSelectedYearId] = useState("");
   const [selectedExamId, setSelectedExamId] = useState("");
   const [selectedKelasId, setSelectedKelasId] = useState("");
-  const [rows, setRows] = useState<ScoreRow[]>([]);
+  const [rawAttempts, setRawAttempts] = useState<RawStudentAttempt[]>([]);
+
+  const [remedialModalOpen, setRemedialModalOpen] = useState(false);
+  const [remedialPreselect, setRemedialPreselect] = useState<string[]>([]);
+
+  const loadExams = useCallback(async () => {
+    const [{ data: y }, { data: ex }, { data: cl }] = await Promise.all([
+      supabase
+        .from("academic_years")
+        .select("*")
+        .order("id", { ascending: false }),
+      supabase
+        .from("exams")
+        .select("*, subjects(id, nama)")
+        .order("id", { ascending: false }),
+      supabase.from("classes").select("*").order("nama"),
+    ]);
+    setYears((y || []) as AcademicYear[]);
+    const exList = (ex || []) as Exam[];
+    setExams(exList);
+    setClasses((cl || []) as SchoolClass[]);
+    if (exList[0] && !selectedExamId) setSelectedExamId(String(exList[0].id));
+  }, [supabase, selectedExamId]);
 
   useEffect(() => {
-    Promise.all([
-      supabase.from("academic_years").select("*").order("id", { ascending: false }),
-      supabase.from("exams").select("*, subjects(id, nama)").order("id", { ascending: false }),
-      supabase.from("classes").select("*").order("nama"),
-    ]).then(([{ data: y }, { data: ex }, { data: cl }]) => {
-      setYears((y || []) as AcademicYear[]);
-      const exList = (ex || []) as Exam[];
-      setExams(exList);
-      setClasses((cl || []) as SchoolClass[]);
-      if (exList[0]) setSelectedExamId(String(exList[0].id));
-    });
-  }, [supabase]);
+    loadExams();
+  }, [loadExams]);
 
   const filteredExams = exams.filter((e) =>
     selectedYearId ? String(e.tahun_ajaran_id || "") === selectedYearId : true
@@ -52,21 +56,23 @@ export default function AdminNilaiPage() {
 
   const loadScores = useCallback(async () => {
     if (!selectedExamId) {
-      setRows([]);
+      setRawAttempts([]);
       return;
     }
     const { data } = await supabase
       .from("attempts")
       .select(
-        "id, status, nilai, nilai_sementara, mulai, selesai, profiles(username, nama, kelas_id, classes(nama))"
+        "id, student_id, attempt_ke, is_remedial, status, nilai, nilai_sementara, mulai, selesai, profiles(id, username, nama, kelas_id, classes(nama))"
       )
       .eq("exam_id", Number(selectedExamId))
       .order("id");
 
-    const list = (data || []) as unknown as ScoreRow[];
-    setRows(
+    const list = (data || []) as unknown as RawStudentAttempt[];
+    setRawAttempts(
       selectedKelasId
-        ? list.filter((r) => String(r.profiles?.kelas_id || "") === selectedKelasId)
+        ? list.filter(
+            (r) => String(r.profiles?.kelas_id || "") === selectedKelasId
+          )
         : list
     );
   }, [supabase, selectedExamId, selectedKelasId]);
@@ -76,36 +82,48 @@ export default function AdminNilaiPage() {
   }, [loadScores]);
 
   const selectedExam = exams.find((e) => String(e.id) === selectedExamId);
+  const remedialRule: RemedialRule =
+    (selectedExam?.aturan_remedial as RemedialRule) || "maks_kkm";
+
+  const aggregated = useMemo(() => {
+    if (!selectedExam) return [];
+    return aggregateGradesByStudent(rawAttempts, selectedExam.kkm, remedialRule);
+  }, [rawAttempts, selectedExam, remedialRule]);
+
+  const belowKkmList = aggregated.filter((a) => a.needs_remedial);
 
   function exportExcel() {
     if (!selectedExam) return;
-    const exportData = rows.map((r, idx) => {
-      const nilaiFinal = r.status === "selesai" ? r.nilai : r.nilai_sementara;
-      return {
-        No: idx + 1,
-        NIS: r.profiles?.username || "-",
-        Nama: r.profiles?.nama || "-",
-        Kelas: r.profiles?.classes?.nama || "-",
-        Status:
-          r.status === "selesai"
-            ? "Selesai"
-            : r.status === "menunggu_koreksi"
-            ? "Menunggu Koreksi Essay"
-            : "Mengerjakan",
-        Nilai: nilaiFinal ?? "-",
-        KKM: selectedExam.kkm,
-        Keterangan:
-          r.status === "selesai" && r.nilai !== null
-            ? r.nilai >= selectedExam.kkm
-              ? "Tuntas"
-              : "Belum Tuntas"
-            : "-",
-        Mulai: formatDateTime(r.mulai),
-        Selesai: formatDateTime(r.selesai),
-      };
-    });
+    const exportData = aggregated.map((r, idx) => ({
+      No: idx + 1,
+      NIS: r.username,
+      Nama: r.nama,
+      Kelas: r.kelas_nama,
+      "Nilai Utama": r.nilai_utama ?? "-",
+      "Nilai Remedial": r.nilai_remedial ?? "-",
+      "Nilai Akhir": r.nilai_akhir ?? "-",
+      KKM: selectedExam.kkm,
+      "Aturan Remedial": remedialRuleLabel(remedialRule),
+      Keterangan: r.keterangan,
+      "Mulai Utama": formatDateTime(r.mulai),
+      "Selesai Terakhir": formatDateTime(r.selesai),
+    }));
 
     const ws = XLSX.utils.json_to_sheet(exportData);
+    ws["!cols"] = [
+      { wch: 5 },
+      { wch: 15 },
+      { wch: 28 },
+      { wch: 26 },
+      { wch: 13 },
+      { wch: 15 },
+      { wch: 13 },
+      { wch: 8 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 20 },
+    ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Rekap Nilai");
     const safeTitle = selectedExam.judul.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -117,10 +135,10 @@ export default function AdminNilaiPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
-            Rekap Nilai & Backup Database
+            Rekap Nilai, Remedial & Backup Database
           </h1>
           <p className="text-sm text-slate-500">
-            Lihat hasil ujian lintas tahun ajaran, ekspor ke Excel, dan unduh backup database satu tombol.
+            Lihat nilai utama & remedial lintas tahun ajaran, buka remedial 1-klik untuk siswa &lt; KKM, ekspor Excel, dan backup database.
           </p>
         </div>
 
@@ -173,14 +191,44 @@ export default function AdminNilaiPage() {
           ))}
         </select>
 
+        {selectedExam && aggregated.length > 0 && (
+          <button
+            onClick={() => {
+              setRemedialPreselect(belowKkmList.map((b) => b.student_id));
+              setRemedialModalOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium cursor-pointer"
+          >
+            <RotateCcw className="w-4 h-4" /> Buka Remedial ({belowKkmList.length}{" "}
+            &lt; KKM)
+          </button>
+        )}
+
         <button
           onClick={exportExcel}
-          disabled={rows.length === 0}
+          disabled={aggregated.length === 0}
           className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-lg text-sm font-medium cursor-pointer"
         >
           <FileSpreadsheet className="w-4 h-4" /> Ekspor Excel
         </button>
       </div>
+
+      {selectedExam && (
+        <div className="text-xs text-slate-600 flex flex-wrap gap-4 px-1">
+          <span>
+            <strong>KKM:</strong> {selectedExam.kkm}
+          </span>
+          <span>
+            <strong>Aturan Remedial:</strong> {remedialRuleLabel(remedialRule)}
+          </span>
+          <span>
+            <strong>Siswa &lt; KKM:</strong>{" "}
+            <span className="text-rose-700 font-semibold">
+              {belowKkmList.length} siswa
+            </span>
+          </span>
+        </div>
+      )}
 
       {/* Tabel Rekap */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
@@ -190,68 +238,65 @@ export default function AdminNilaiPage() {
               <th className="text-left px-4 py-3">NIS</th>
               <th className="text-left px-4 py-3">Nama Peserta</th>
               <th className="text-left px-4 py-3">Kelas</th>
-              <th className="text-left px-4 py-3">Status</th>
-              <th className="text-left px-4 py-3">Nilai</th>
-              <th className="text-left px-4 py-3">Keterangan (KKM {selectedExam?.kkm ?? "-"})</th>
+              <th className="text-center px-3 py-3">Nilai Utama</th>
+              <th className="text-center px-3 py-3">Remedial</th>
+              <th className="text-center px-3 py-3">Nilai Akhir</th>
+              <th className="text-left px-4 py-3">Keterangan</th>
+              <th className="text-right px-4 py-3">Aksi</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {rows.map((r) => {
-              const tuntas =
-                r.status === "selesai" &&
-                r.nilai !== null &&
-                selectedExam &&
-                r.nilai >= selectedExam.kkm;
-              return (
-                <tr key={r.id}>
-                  <td className="px-4 py-2.5 font-mono text-xs">
-                    {r.profiles?.username || "-"}
-                  </td>
-                  <td className="px-4 py-2.5 font-medium text-slate-900">
-                    {r.profiles?.nama || "-"}
-                  </td>
-                  <td className="px-4 py-2.5 text-slate-600">
-                    {r.profiles?.classes?.nama || "-"}
-                  </td>
-                  <td className="px-4 py-2.5 text-xs">
-                    {r.status === "selesai"
-                      ? "Selesai"
-                      : r.status === "menunggu_koreksi"
-                      ? "Menunggu Koreksi"
-                      : "Mengerjakan"}
-                  </td>
-                  <td className="px-4 py-2.5 font-bold text-slate-900">
-                    {r.status === "selesai" ? (
-                      r.nilai
-                    ) : r.status === "menunggu_koreksi" ? (
-                      <span className="text-amber-700">
-                        {r.nilai_sementara} (sementara)
-                      </span>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {r.status === "selesai" && r.nilai !== null ? (
-                      <span
-                        className={`px-2 py-0.5 text-xs rounded-full font-medium ${
-                          tuntas
-                            ? "bg-emerald-100 text-emerald-700"
-                            : "bg-rose-100 text-rose-700"
-                        }`}
-                      >
-                        {tuntas ? "Tuntas" : "Belum Tuntas"}
-                      </span>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-            {rows.length === 0 && (
+            {aggregated.map((r) => (
+              <tr key={r.student_id}>
+                <td className="px-4 py-2.5 font-mono text-xs">{r.username}</td>
+                <td className="px-4 py-2.5 font-medium text-slate-900">
+                  {r.nama}
+                </td>
+                <td className="px-4 py-2.5 text-slate-600 text-xs">
+                  {r.kelas_nama}
+                </td>
+                <td className="px-3 py-2.5 text-center font-medium text-slate-700">
+                  {r.nilai_utama ?? "-"}
+                </td>
+                <td className="px-3 py-2.5 text-center font-medium text-purple-700">
+                  {r.nilai_remedial ?? "-"}
+                </td>
+                <td className="px-3 py-2.5 text-center font-bold text-slate-900">
+                  {r.nilai_akhir ?? "-"}
+                </td>
+                <td className="px-4 py-2.5">
+                  <span
+                    className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+                      r.keterangan === "Tuntas"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : r.keterangan === "Tuntas Remedial"
+                        ? "bg-blue-100 text-blue-700"
+                        : r.keterangan === "Belum Tuntas"
+                        ? "bg-rose-100 text-rose-700"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                  >
+                    {r.keterangan}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  {r.needs_remedial && (
+                    <button
+                      onClick={() => {
+                        setRemedialPreselect([r.student_id]);
+                        setRemedialModalOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" /> Remedial
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {aggregated.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
                   Belum ada data nilai untuk ujian ini.
                 </td>
               </tr>
@@ -275,6 +320,22 @@ export default function AdminNilaiPage() {
           <Download className="w-3.5 h-3.5" /> Unduh Backup Sekarang
         </a>
       </div>
+
+      {remedialModalOpen && selectedExam && (
+        <RemedialModal
+          examId={selectedExam.id}
+          examTitle={selectedExam.judul}
+          kkm={selectedExam.kkm}
+          initialRule={remedialRule}
+          candidates={aggregated}
+          preselectedIds={remedialPreselect}
+          onClose={() => setRemedialModalOpen(false)}
+          onSuccess={() => {
+            loadExams();
+            loadScores();
+          }}
+        />
+      )}
     </div>
   );
 }

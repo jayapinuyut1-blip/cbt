@@ -3,6 +3,7 @@ export type QuestionType = "pg" | "isian" | "jodoh" | "essay";
 export type ExamKind = "resmi" | "latihan";
 export type ExamNavigation = "bebas" | "berurutan";
 export type ExamResultVisibility = "tidak" | "nilai" | "nilai_kunci";
+export type ExamRemedialRule = "maks_kkm" | "nilai_terbaik" | "nilai_terakhir";
 export type AttemptStatus = "mengerjakan" | "menunggu_koreksi" | "selesai";
 export type LogEventType = "pindah_tab" | "keluar_layar_penuh" | "reset_login";
 
@@ -77,6 +78,7 @@ export interface Exam {
   navigasi: ExamNavigation;
   petunjuk: string;
   tampil_hasil: ExamResultVisibility;
+  aturan_remedial?: ExamRemedialRule;
   token: string;
   created_at: string;
   subjects?: { id: number; nama: string } | null;
@@ -125,10 +127,15 @@ export interface StudentAvailableExam {
   selesai_efektif: string;
   jumlah_soal: number;
   attempt_id: number | null;
+  attempt_ke?: number | null;
+  is_remedial?: boolean | null;
   attempt_status: AttemptStatus | null;
   attempt_mulai: string | null;
   attempt_selesai: string | null;
   nilai_tampil: number | null;
+  remedial_tersedia?: boolean;
+  remedial_ke?: number;
+  aturan_remedial?: ExamRemedialRule;
   sedang_dibuka: boolean;
   server_now: string;
 }

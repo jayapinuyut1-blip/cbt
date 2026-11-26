@@ -118,14 +118,44 @@ export default function SiswaDashboardPage() {
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-3">
-                {isFinished ? (
+              <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
+                {ex.remedial_tersedia ? (
                   <>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 font-semibold">
+                        Remedial #{Math.max(1, (ex.remedial_ke || 2) - 1)} Dibuka
+                      </span>
+                      {ex.attempt_id && (
+                        <Link
+                          href={`/siswa/hasil/${ex.attempt_id}`}
+                          className="text-slate-600 hover:underline font-medium"
+                        >
+                          Lihat Hasil Sebelumnya
+                        </Link>
+                      )}
+                    </div>
+                    {ex.sedang_dibuka && !isBlocked ? (
+                      <Link
+                        href={`/siswa/ujian/${ex.exam_id}`}
+                        className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2"
+                      >
+                        <Play className="w-4 h-4" /> Ikuti Ujian Remedial
+                      </Link>
+                    ) : (
+                      <div className="w-full text-center py-2 rounded-lg bg-slate-100 text-slate-500 text-xs font-medium">
+                        {isBlocked ? "Akun Diblokir" : "Menunggu Jadwal Remedial"}
+                      </div>
+                    )}
+                  </>
+                ) : isFinished ? (
+                  <div className="flex items-center justify-between gap-3">
                     <div className="text-xs">
                       <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
                         <CheckCircle2 className="w-4 h-4" />
                         {ex.attempt_status === "menunggu_koreksi"
                           ? "Menunggu Koreksi Essay"
+                          : ex.is_remedial
+                          ? `Selesai (Remedial #${Math.max(1, (ex.attempt_ke || 2) - 1)})`
                           : "Selesai"}
                       </span>
                       {ex.nilai_tampil !== null && (
@@ -142,7 +172,7 @@ export default function SiswaDashboardPage() {
                         Lihat Hasil
                       </Link>
                     )}
-                  </>
+                  </div>
                 ) : isInProgress ? (
                   <Link
                     href={`/siswa/ujian/${ex.exam_id}`}

@@ -20,6 +20,7 @@ import type {
   Exam,
   ExamKind,
   ExamNavigation,
+  ExamRemedialRule,
   ExamResultVisibility,
   ExamSchedule,
   Question,
@@ -60,6 +61,8 @@ export default function GuruUjianPage() {
   const [acakOpsi, setAcakOpsi] = useState(true);
   const [navigasi, setNavigasi] = useState<ExamNavigation>("bebas");
   const [tampilHasil, setTampilHasil] = useState<ExamResultVisibility>("nilai");
+  const [aturanRemedial, setAturanRemedial] =
+    useState<ExamRemedialRule>("maks_kkm");
   const [petunjuk, setPetunjuk] = useState(
     "Berdoalah sebelum mengerjakan. Periksa kembali jawaban Anda sebelum mengumpulkan ujian."
   );
@@ -171,6 +174,7 @@ export default function GuruUjianPage() {
     setAcakOpsi(true);
     setNavigasi("bebas");
     setTampilHasil("nilai");
+    setAturanRemedial("maks_kkm");
     setPetunjuk(
       "Berdoalah sebelum mengerjakan. Periksa kembali jawaban Anda sebelum mengumpulkan ujian."
     );
@@ -207,6 +211,7 @@ export default function GuruUjianPage() {
     setAcakOpsi(ex.acak_opsi);
     setNavigasi(ex.navigasi);
     setTampilHasil(ex.tampil_hasil);
+    setAturanRemedial(ex.aturan_remedial || "maks_kkm");
     setPetunjuk(ex.petunjuk || "");
 
     // Muat jadwal ujian yang ada (jika ada)
@@ -293,6 +298,7 @@ export default function GuruUjianPage() {
         navigasi,
         petunjuk: petunjuk.trim(),
         tampil_hasil: tampilHasil,
+        aturan_remedial: aturanRemedial,
       };
 
       let targetId = editingId;
@@ -833,6 +839,23 @@ export default function GuruUjianPage() {
                     <option value="nilai_kunci">
                       Nilai beserta jawaban benar
                     </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Aturan Nilai Jika Remedial
+                  </label>
+                  <select
+                    value={aturanRemedial}
+                    onChange={(e) =>
+                      setAturanRemedial(e.target.value as ExamRemedialRule)
+                    }
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                  >
+                    <option value="maks_kkm">Maksimal KKM (Cap KKM)</option>
+                    <option value="nilai_terbaik">Nilai Terbaik (MAX)</option>
+                    <option value="nilai_terakhir">Nilai Remedial Terakhir</option>
                   </select>
                 </div>
               </div>

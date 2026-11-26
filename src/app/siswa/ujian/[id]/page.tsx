@@ -66,6 +66,7 @@ export default function SiswaUjianPage() {
         }
       } else if (
         found?.attempt_id &&
+        !found?.remedial_tersedia &&
         (found.attempt_status === "selesai" ||
           found.attempt_status === "menunggu_koreksi")
       ) {
@@ -144,9 +145,16 @@ export default function SiswaUjianPage() {
 
       <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 space-y-6">
         <div>
-          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700">
-            {examInfo.jenis === "latihan" ? "Latihan" : "Ujian Resmi"}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700">
+              {examInfo.jenis === "latihan" ? "Latihan" : "Ujian Resmi"}
+            </span>
+            {examInfo.remedial_tersedia && (
+              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800">
+                Ujian Remedial #{Math.max(1, (examInfo.remedial_ke || 2) - 1)}
+              </span>
+            )}
+          </div>
           <h1 className="text-2xl font-bold text-slate-900 mt-2">
             {examInfo.judul}
           </h1>

@@ -31,6 +31,41 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
+    if (action === "reset_login_bulk") {
+      const studentIds: string[] = Array.isArray(body.student_ids)
+        ? body.student_ids.map((x: unknown) => String(x)).filter(Boolean)
+        : [];
+      if (studentIds.length === 0) {
+        return NextResponse.json(
+          { error: "Tidak ada siswa yang dipilih." },
+          { status: 400 }
+        );
+      }
+      await admin
+        .from("profiles")
+        .update({ active_session_id: null })
+        .in("id", studentIds);
+      return NextResponse.json({ ok: true, count: studentIds.length });
+    }
+
+    if (action === "reset_attempt_total" && attemptId) {
+      // Hapus percobaan bermasalah (beserta jawaban & log) agar siswa bisa mulai dari awal
+      const { error: delErr } = await admin
+        .from("attempts")
+        .delete()
+        .eq("id", attemptId);
+      if (delErr) {
+        return NextResponse.json({ error: delErr.message }, { status: 400 });
+      }
+      if (studentId) {
+        await admin
+          .from("profiles")
+          .update({ active_session_id: null })
+          .eq("id", studentId);
+      }
+      return NextResponse.json({ ok: true });
+    }
+
     if (action === "add_time" && attemptId) {
       const minutes = Math.max(1, Math.min(180, Number(body.minutes || 10)));
       const { data: att } = await admin
