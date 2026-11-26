@@ -74,6 +74,7 @@ export async function getSchoolSettings(): Promise<SchoolSettings> {
     logo: "",
     alamat_sekolah: "",
     tema: DEFAULT_THEME_ID,
+    pengumuman_login: "",
   };
   if (!isSupabaseConfigured()) {
     return fallback;
@@ -95,6 +96,7 @@ export async function getSchoolSettings(): Promise<SchoolSettings> {
       logo: map.logo || "",
       alamat_sekolah: map.alamat_sekolah || "",
       tema: normalizeThemeId(map.tema),
+      pengumuman_login: map.pengumuman_login || "",
     };
   } catch {
     return fallback;

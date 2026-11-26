@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { GraduationCap, Lock, User, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { GraduationCap, Lock, User, Eye, EyeOff, AlertCircle, Megaphone } from "lucide-react";
 import { getThemeMeta } from "@/lib/themes";
 import type { SchoolSettings } from "@/types/cbt";
 
@@ -75,6 +75,15 @@ export default function LoginForm({
             Aplikasi Ujian Berbasis Komputer (CBT)
           </p>
         </div>
+
+        {settings.pengumuman_login?.trim() && (
+          <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs sm:text-sm flex items-start gap-2.5">
+            <Megaphone className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+            <div className="whitespace-pre-wrap leading-relaxed">
+              {settings.pengumuman_login.trim()}
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm flex items-start gap-2">

@@ -126,6 +126,7 @@ export interface SchoolSettings {
   logo: string;
   alamat_sekolah: string;
   tema?: string;
+  pengumuman_login?: string;
 }
 
 export interface StudentAvailableExam {

@@ -11,7 +11,7 @@ import {
   normalizeThemeId,
   type AppThemeId,
 } from "@/lib/themes";
-import { Save, Upload, CheckCircle2, Palette, Check } from "lucide-react";
+import { Save, Upload, CheckCircle2, Palette, Check, Megaphone } from "lucide-react";
 
 export default function AdminPengaturanPage() {
   const router = useRouter();
@@ -19,6 +19,7 @@ export default function AdminPengaturanPage() {
   const [namaSekolah, setNamaSekolah] = useState("");
   const [alamatSekolah, setAlamatSekolah] = useState("");
   const [logo, setLogo] = useState("");
+  const [pengumumanLogin, setPengumumanLogin] = useState("");
   const [tema, setTema] = useState<AppThemeId>(DEFAULT_THEME_ID);
   const savedTemaRef = useRef<AppThemeId>(DEFAULT_THEME_ID);
 
@@ -42,6 +43,7 @@ export default function AdminPengaturanPage() {
           if (row.kunci === "nama_sekolah") setNamaSekolah(row.nilai);
           if (row.kunci === "alamat_sekolah") setAlamatSekolah(row.nilai);
           if (row.kunci === "logo") setLogo(row.nilai);
+          if (row.kunci === "pengumuman_login") setPengumumanLogin(row.nilai);
           if (row.kunci === "tema") {
             const norm = normalizeThemeId(row.nilai);
             setTema(norm);
@@ -103,6 +105,7 @@ export default function AdminPengaturanPage() {
       { kunci: "nama_sekolah", nilai: namaSekolah.trim() },
       { kunci: "alamat_sekolah", nilai: alamatSekolah.trim() },
       { kunci: "logo", nilai: logo.trim() },
+      { kunci: "pengumuman_login", nilai: pengumumanLogin.trim() },
       { kunci: "tema", nilai: tema },
     ]);
     setSaving(false);
@@ -203,6 +206,34 @@ export default function AdminPengaturanPage() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* Kartu Pengumuman Halaman Login */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 space-y-3 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <Megaphone className="w-5 h-5 text-amber-600" />
+            <div>
+              <h2 className="font-bold text-base text-slate-900">
+                Banner Pengumuman Halaman Login (Opsional)
+              </h2>
+              <p className="text-xs text-slate-500">
+                Tampil langsung di atas form login siswa & guru. Kosongkan jika tidak ada pengumuman.
+              </p>
+            </div>
+          </div>
+          <textarea
+            rows={2}
+            value={pengumumanLogin}
+            onChange={(e) => setPengumumanLogin(e.target.value)}
+            placeholder="Contoh: PAS Ganjil Jam II dimulai pukul 08.00 WITA. Siapkan Kartu Login dan pastikan baterai HP cukup."
+            className="w-full px-3 py-2 rounded-lg border border-slate-300 text-base sm:text-sm"
+          />
+          {pengumumanLogin.trim() && (
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-xs flex items-start gap-2">
+              <Megaphone className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+              <div className="whitespace-pre-wrap">{pengumumanLogin.trim()}</div>
+            </div>
+          )}
         </div>
 
         {/* Kartu Pemilih Tema Tampilan (Live Preview) */}

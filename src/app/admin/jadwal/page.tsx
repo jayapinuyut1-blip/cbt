@@ -19,7 +19,8 @@ import type {
   SchoolClass,
   SchoolSettings,
 } from "@/types/cbt";
-import { Plus, RefreshCw, Trash2, Printer, UserCheck } from "lucide-react";
+import BeritaAcaraPrintView from "@/components/admin/BeritaAcaraPrintView";
+import { Plus, RefreshCw, Trash2, Printer, UserCheck, FileText } from "lucide-react";
 
 export default function AdminJadwalPage() {
   const supabase = createClient();
@@ -54,8 +55,10 @@ export default function AdminJadwalPage() {
   const [ovMulai, setOvMulai] = useState("");
   const [ovSelesai, setOvSelesai] = useState("");
 
-  // Mode cetak daftar hadir
+  // Mode cetak daftar hadir & berita acara
   const [attendanceSchedule, setAttendanceSchedule] =
+    useState<ExamSchedule | null>(null);
+  const [beritaAcaraSchedule, setBeritaAcaraSchedule] =
     useState<ExamSchedule | null>(null);
 
   const loadAll = useCallback(async () => {
@@ -193,6 +196,21 @@ export default function AdminJadwalPage() {
   async function deleteOverride(id: number) {
     await supabase.from("exam_overrides").delete().eq("id", id);
     loadAll();
+  }
+
+  // Cetak Berita Acara Pelaksanaan Ujian
+  if (beritaAcaraSchedule) {
+    const peserta = students.filter(
+      (s) => s.kelas_id === beritaAcaraSchedule.kelas_id
+    );
+    return (
+      <BeritaAcaraPrintView
+        schedule={beritaAcaraSchedule}
+        peserta={peserta}
+        settings={settings}
+        onBack={() => setBeritaAcaraSchedule(null)}
+      />
+    );
   }
 
   // Cetak Daftar Hadir
@@ -503,6 +521,12 @@ export default function AdminJadwalPage() {
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-medium text-slate-700 cursor-pointer"
                     >
                       <Printer className="w-3.5 h-3.5" /> Daftar Hadir
+                    </button>
+                    <button
+                      onClick={() => setBeritaAcaraSchedule(s)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-xs font-medium text-blue-700 cursor-pointer"
+                    >
+                      <FileText className="w-3.5 h-3.5" /> Berita Acara
                     </button>
                     <button
                       onClick={() => deleteSchedule(s.id)}
