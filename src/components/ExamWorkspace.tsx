@@ -27,6 +27,8 @@ import {
   Send,
   Cloud,
   Loader2,
+  LayoutGrid,
+  X,
 } from "lucide-react";
 
 function getClientSessionCookie(): string | null {
@@ -76,6 +78,7 @@ export default function ExamWorkspace({
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [submitting, setSubmitting] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showMobileNav, setShowMobileNav] = useState(false);
   const [conflictError, setConflictError] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -346,21 +349,21 @@ export default function ExamWorkspace({
 
   return (
     <div
-      className={`min-h-screen flex flex-col ${
+      className={`min-h-[100dvh] flex flex-col ${
         highContrast ? "high-contrast" : "bg-slate-50 text-slate-900"
       }`}
     >
       {/* Banner Mode Pratinjau Guru */}
       {mode === "preview" && (
-        <div className="bg-indigo-700 text-white px-4 py-2 text-xs sm:text-sm flex items-center justify-between">
-          <span>
-            <strong>MODE PRATINJAU GURU</strong> — Tampilan ini sama persis dengan layar ujian siswa.
+        <div className="bg-indigo-700 text-white px-3.5 sm:px-4 py-2 text-xs sm:text-sm flex items-center justify-between gap-2">
+          <span className="truncate">
+            <strong>PRATINJAU GURU</strong> — Tampilan identik dengan layar siswa.
           </span>
           <button
             onClick={onExitPreview}
-            className="px-3 py-1 bg-white text-indigo-800 rounded font-semibold text-xs cursor-pointer"
+            className="px-3 py-1 bg-white text-indigo-800 rounded font-semibold text-xs cursor-pointer shrink-0"
           >
-            Keluar Pratinjau
+            Keluar
           </button>
         </div>
       )}
@@ -374,30 +377,51 @@ export default function ExamWorkspace({
           </div>
           <button
             onClick={() => router.push("/login")}
-            className="px-3 py-1 bg-white text-red-700 rounded font-semibold text-xs cursor-pointer"
+            className="px-3 py-1 bg-white text-red-700 rounded font-semibold text-xs cursor-pointer shrink-0"
           >
             Kembali ke Login
           </button>
         </div>
       )}
 
-      {/* Header Ujian */}
-      <header className="sticky top-0 z-20 bg-white border-b border-slate-200 px-4 py-3 hc-card">
-        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="font-bold text-sm sm:text-base truncate">
-              {session.exam.judul}
+      {/* Header Ujian (Tema & aksen konsisten Desktop & Mobile) */}
+      <header
+        className={`sticky top-0 z-20 bg-white border-b border-slate-200 border-t-[3px] px-3.5 sm:px-4 py-2.5 sm:py-3 shadow-2xs hc-card ${
+          highContrast ? "border-t-yellow-400" : "border-t-blue-600"
+        }`}
+      >
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <div className="min-w-0">
+              <div className="font-bold text-sm sm:text-base truncate">
+                {session.exam.judul}
+              </div>
+              <div className="text-[11px] sm:text-xs text-slate-500 hc-muted truncate">
+                {session.exam.mapel} • Soal {currentIdx + 1}/{session.questions.length}
+              </div>
             </div>
-            <div className="text-xs text-slate-500 hc-muted">
-              {session.exam.mapel} • Soal {currentIdx + 1} dari{" "}
-              {session.questions.length}
+
+            {/* Timer ringkas kanan atas khusus Mobile */}
+            <div
+              className={`sm:hidden flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-mono font-bold shrink-0 ${
+                isLowTime
+                  ? "bg-red-50 border-red-400 text-red-700 animate-pulse"
+                  : "bg-blue-50/70 border-blue-200 text-blue-900 hc-option"
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>
+                {hideTimer && !isLowTime
+                  ? "Tersembunyi"
+                  : formatCountdown(remainingSec)}
+              </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 flex-wrap">
             {/* Indikator Simpan Otomatis */}
             {mode === "live" && (
-              <div className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
+              <div className="text-[11px] sm:text-xs flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 hc-option">
                 {saveStatus === "saving" ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
@@ -414,12 +438,12 @@ export default function ExamWorkspace({
               </div>
             )}
 
-            {/* Timer dengan opsi sembunyikan + peringatan 5 menit */}
+            {/* Timer Desktop/Tablet */}
             <div
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-mono font-bold ${
+              className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-mono font-bold ${
                 isLowTime
                   ? "bg-red-50 border-red-400 text-red-700 animate-pulse"
-                  : "bg-slate-100 border-slate-200 text-slate-800"
+                  : "bg-blue-50/70 border-blue-200 text-blue-900 hc-option"
               }`}
             >
               <Clock className="w-4 h-4" />
@@ -444,49 +468,63 @@ export default function ExamWorkspace({
               )}
             </div>
 
-            {/* Kontrol Aksesibilitas: Ukuran Teks & Kontras Tinggi */}
-            <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden">
+            <div className="flex items-center gap-1.5">
+              {/* Kontrol Aksesibilitas: Ukuran Teks & Kontras Tinggi */}
+              <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden hc-option">
+                <button
+                  type="button"
+                  onClick={() => setTextScale((s) => Math.max(0, s - 1))}
+                  title="Perkecil Teks"
+                  className="px-2 py-1.5 text-xs font-bold hover:bg-slate-100 cursor-pointer"
+                >
+                  A-
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTextScale((s) => Math.min(3, s + 1))}
+                  title="Perbesar Teks"
+                  className="px-2 py-1.5 text-xs font-bold hover:bg-slate-100 border-l border-slate-200 cursor-pointer"
+                >
+                  <Type className="w-3.5 h-3.5 inline mr-0.5" />+
+                </button>
+              </div>
+
               <button
                 type="button"
-                onClick={() => setTextScale((s) => Math.max(0, s - 1))}
-                title="Perkecil Teks"
-                className="px-2 py-1.5 text-xs font-bold hover:bg-slate-100 cursor-pointer"
+                onClick={() => setHighContrast(!highContrast)}
+                title="Mode Kontras Tinggi"
+                className={`p-1.5 sm:p-2 rounded-lg border cursor-pointer ${
+                  highContrast
+                    ? "bg-yellow-400 text-black border-yellow-400"
+                    : "border-slate-200 hover:bg-slate-100"
+                }`}
               >
-                A-
+                <Contrast className="w-4 h-4" />
               </button>
+
+              {mode === "live" && !isFullscreen && (
+                <button
+                  type="button"
+                  onClick={requestFullscreen}
+                  title="Masuk Layar Penuh"
+                  className="hidden sm:inline-flex p-2 rounded-lg border border-slate-200 hover:bg-slate-100 cursor-pointer"
+                >
+                  <Maximize className="w-4 h-4" />
+                </button>
+              )}
+
+              {/* Tombol Buka Daftar Nomor Soal khusus Mobile/Tablet */}
               <button
                 type="button"
-                onClick={() => setTextScale((s) => Math.min(3, s + 1))}
-                title="Perbesar Teks"
-                className="px-2 py-1.5 text-xs font-bold hover:bg-slate-100 border-l border-slate-200 cursor-pointer"
+                onClick={() => setShowMobileNav(true)}
+                className="lg:hidden inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold cursor-pointer"
               >
-                <Type className="w-3.5 h-3.5 inline mr-0.5" />+
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>
+                  {answeredCount}/{session.questions.length}
+                </span>
               </button>
             </div>
-
-            <button
-              type="button"
-              onClick={() => setHighContrast(!highContrast)}
-              title="Mode Kontras Tinggi"
-              className={`p-2 rounded-lg border cursor-pointer ${
-                highContrast
-                  ? "bg-yellow-400 text-black border-yellow-400"
-                  : "border-slate-200 hover:bg-slate-100"
-              }`}
-            >
-              <Contrast className="w-4 h-4" />
-            </button>
-
-            {mode === "live" && !isFullscreen && (
-              <button
-                type="button"
-                onClick={requestFullscreen}
-                title="Masuk Layar Penuh"
-                className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 cursor-pointer"
-              >
-                <Maximize className="w-4 h-4" />
-              </button>
-            )}
           </div>
         </div>
       </header>
@@ -499,7 +537,7 @@ export default function ExamWorkspace({
       )}
 
       {/* Konten Utama: 1 Soal per Layar + Panel Nomor Soal */}
-      <div className="flex-1 max-w-6xl w-full mx-auto p-4 grid lg:grid-cols-12 gap-5 items-start">
+      <div className="flex-1 max-w-6xl w-full mx-auto p-3.5 sm:p-4 pb-24 lg:pb-6 grid lg:grid-cols-12 gap-5 items-start">
         {/* Area Soal */}
         <section className="lg:col-span-8 bg-white rounded-2xl border border-slate-200 p-5 sm:p-7 space-y-5 hc-card">
           <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-200">
@@ -701,8 +739,8 @@ export default function ExamWorkspace({
             </div>
           )}
 
-          {/* Navigasi Sebelumnya / Berikutnya */}
-          <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+          {/* Navigasi Sebelumnya / Berikutnya (Desktop) */}
+          <div className="hidden lg:flex items-center justify-between pt-4 border-t border-slate-200">
             <button
               type="button"
               disabled={currentIdx === 0 || isSequential}
@@ -739,8 +777,8 @@ export default function ExamWorkspace({
           </div>
         </section>
 
-        {/* Panel Daftar Nomor Soal */}
-        <aside className="lg:col-span-4 bg-white rounded-2xl border border-slate-200 p-5 space-y-4 hc-card">
+        {/* Panel Daftar Nomor Soal (Desktop Sidebar) */}
+        <aside className="hidden lg:block lg:col-span-4 bg-white rounded-2xl border border-slate-200 p-5 space-y-4 hc-card sticky top-20">
           <div>
             <h2 className="font-bold text-sm">Daftar Nomor Soal</h2>
             <p className="text-xs text-slate-500 hc-muted mt-0.5">
@@ -812,6 +850,154 @@ export default function ExamWorkspace({
           </button>
         </aside>
       </div>
+
+      {/* Bilah Navigasi Bawah Tetap Khusus Mobile/Tablet (Tema Identik Desktop) */}
+      <div className="lg:hidden fixed bottom-0 inset-x-0 z-20 bg-white/95 backdrop-blur border-t border-slate-200 px-3.5 pt-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(15,23,42,0.06)] hc-card">
+        <div className="max-w-3xl mx-auto flex items-center justify-between gap-2">
+          <button
+            type="button"
+            disabled={currentIdx === 0 || isSequential}
+            onClick={() => setCurrentIdx((i) => Math.max(0, i - 1))}
+            className="inline-flex items-center gap-1 px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-800 text-xs sm:text-sm font-semibold cursor-pointer"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            <span>Prev</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowMobileNav(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-xs sm:text-sm font-semibold cursor-pointer hc-option"
+          >
+            <LayoutGrid className="w-4 h-4 text-blue-600" />
+            <span>
+              No. {currentIdx + 1}/{session.questions.length}
+            </span>
+          </button>
+
+          {currentIdx < session.questions.length - 1 ? (
+            <button
+              type="button"
+              onClick={() =>
+                setCurrentIdx((i) =>
+                  Math.min(session.questions.length - 1, i + 1)
+                )
+              }
+              className="inline-flex items-center gap-1 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold cursor-pointer"
+            >
+              <span>Next</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowConfirmModal(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold cursor-pointer"
+            >
+              <Send className="w-4 h-4" />
+              <span>Kumpulkan</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Sheet Daftar Nomor Soal Khusus Mobile/Tablet */}
+      {showMobileNav && (
+        <div className="lg:hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+          <div
+            className="fixed inset-0 bg-slate-900/50 backdrop-blur-[1px]"
+            onClick={() => setShowMobileNav(false)}
+          />
+          <div className="relative z-10 w-full sm:max-w-md max-h-[82dvh] overflow-y-auto bg-white rounded-t-2xl sm:rounded-2xl border border-slate-200 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-4 hc-card">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="font-bold text-base">Daftar Nomor Soal</h2>
+                <p className="text-xs text-slate-500 hc-muted">
+                  Terjawab: {answeredCount}/{session.questions.length} • Ragu:{" "}
+                  {raguCount}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMobileNav(false)}
+                className="p-2 rounded-lg hover:bg-slate-100 cursor-pointer"
+                aria-label="Tutup daftar nomor"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {isSequential && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
+                Mode Berurutan: Anda tidak dapat kembali ke nomor sebelumnya.
+              </p>
+            )}
+
+            <div className="grid grid-cols-5 sm:grid-cols-6 gap-2">
+              {session.questions.map((q, idx) => {
+                const st = answers[String(q.id)];
+                const answered = isQuestionAnswered(q, st);
+                const ragu = Boolean(st?.ragu);
+                const isCurrent = idx === currentIdx;
+                const disabled = isSequential && idx < currentIdx;
+
+                let btnStyle =
+                  "bg-slate-50 border-slate-300 text-slate-700";
+                if (ragu) {
+                  btnStyle = "bg-amber-400 border-amber-500 text-slate-900 font-bold";
+                } else if (answered) {
+                  btnStyle =
+                    "bg-emerald-600 border-emerald-600 text-white font-bold";
+                }
+
+                return (
+                  <button
+                    key={q.id}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => {
+                      setCurrentIdx(idx);
+                      setShowMobileNav(false);
+                    }}
+                    className={`h-11 rounded-lg border text-sm transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${btnStyle} ${
+                      isCurrent ? "ring-2 ring-blue-600 ring-offset-2" : ""
+                    }`}
+                  >
+                    {idx + 1}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-wrap gap-3 text-xs text-slate-500 hc-muted pt-2 border-t border-slate-200">
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded bg-emerald-600 inline-block" />
+                Dijawab
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded bg-amber-400 inline-block" />
+                Ragu-ragu
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded border border-slate-400 bg-slate-50 inline-block" />
+                Belum
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowMobileNav(false);
+                setShowConfirmModal(true);
+              }}
+              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Selesai & Kumpulkan
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Modal Konfirmasi Kumpulkan */}
       {showConfirmModal && (

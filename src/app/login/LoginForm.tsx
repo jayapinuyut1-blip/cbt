@@ -44,8 +44,10 @@ export default function LoginForm({
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
+    <div className="min-h-[100dvh] flex items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 p-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+        <div className="h-1.5 bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-600" />
+        <div className="p-6 sm:p-8">
         <div className="flex flex-col items-center text-center mb-6">
           {settings.logo ? (
             <img
@@ -54,14 +56,14 @@ export default function LoginForm({
               className="w-16 h-16 object-contain mb-3"
             />
           ) : (
-            <div className="w-14 h-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center mb-3 shadow-md">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-700 to-blue-600 text-white flex items-center justify-center mb-3 shadow-md">
               <GraduationCap className="w-8 h-8" />
             </div>
           )}
-          <h1 className="text-xl font-bold text-slate-900">
+          <h1 className="text-lg sm:text-xl font-bold text-slate-900">
             {settings.nama_sekolah}
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className="text-xs sm:text-sm text-slate-500 mt-1">
             Aplikasi Ujian Berbasis Komputer (CBT)
           </p>
         </div>
@@ -87,7 +89,7 @@ export default function LoginForm({
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="Masukkan NIS atau username"
-                className="w-full pl-10 pr-3 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-10 pr-3 py-2.5 rounded-lg border border-slate-300 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
           </div>
@@ -105,7 +107,7 @@ export default function LoginForm({
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Masukkan kata sandi"
-                className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-slate-300 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
               <button
                 type="button"
@@ -125,7 +127,7 @@ export default function LoginForm({
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold rounded-lg text-sm transition cursor-pointer"
+            className="w-full py-2.5 px-4 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-800 hover:to-blue-700 disabled:opacity-60 text-white font-semibold rounded-lg text-sm transition cursor-pointer shadow-xs"
           >
             {loading ? "Memverifikasi..." : "Masuk"}
           </button>
@@ -133,6 +135,7 @@ export default function LoginForm({
 
         <div className="mt-6 pt-4 border-t border-slate-100 text-center text-xs text-slate-400">
           Gunakan NIS dan kata sandi dari kartu login ujian Anda.
+        </div>
         </div>
       </div>
     </div>
