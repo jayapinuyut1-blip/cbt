@@ -40,6 +40,10 @@ begin
   v_jwt_role := coalesce(current_setting('request.jwt.claim.role', true), '');
   v_internal := coalesce(current_setting('app.internal_grade', true), 'false');
 
+  if v_internal <> 'true' and v_jwt_role <> 'service_role' and auth.uid() is null then
+    raise exception 'Akses ditolak';
+  end if;
+
   select * into v_attempt from public.attempts where id = p_attempt_id;
   if not found then
     raise exception 'Percobaan ujian tidak ditemukan';
@@ -49,9 +53,6 @@ begin
 
   -- Validasi otorisasi pemanggil: blokir anon & siswa langsung
   if v_internal <> 'true' and v_jwt_role <> 'service_role' then
-    if auth.uid() is null then
-      raise exception 'Akses ditolak';
-    end if;
     if not public.can_access_subject(v_exam.subject_id) then
       raise exception 'Akses ditolak: hanya Admin atau Guru pengampu mapel yang berhak menghitung ulang nilai.';
     end if;
@@ -560,12 +561,21 @@ begin
 end;
 $$;
 
--- 5. Cabut izin EXECUTE dari role anon pada seluruh fungsi RPC ujian sensitif
-revoke execute on function public.recalculate_attempt_score(bigint) from anon;
-revoke execute on function public.get_student_available_exams() from anon;
-revoke execute on function public.start_or_resume_exam(bigint, text, text) from anon;
-revoke execute on function public.save_student_answer(bigint, bigint, jsonb, boolean, text) from anon;
-revoke execute on function public.log_attempt_event(bigint, text, text) from anon;
-revoke execute on function public.submit_exam_attempt(bigint, text) from anon;
-revoke execute on function public.get_attempt_result(bigint) from anon;
-revoke execute on function public.get_exam_preview(bigint) from anon;
+-- 5. Cabut izin EXECUTE dari PUBLIC dan anon, berikan hanya ke authenticated & service_role
+revoke all on function public.recalculate_attempt_score(bigint) from public, anon;
+revoke all on function public.get_student_available_exams() from public, anon;
+revoke all on function public.start_or_resume_exam(bigint, text, text) from public, anon;
+revoke all on function public.save_student_answer(bigint, bigint, jsonb, boolean, text) from public, anon;
+revoke all on function public.log_attempt_event(bigint, text, text) from public, anon;
+revoke all on function public.submit_exam_attempt(bigint, text) from public, anon;
+revoke all on function public.get_attempt_result(bigint) from public, anon;
+revoke all on function public.get_exam_preview(bigint) from public, anon;
+
+grant execute on function public.recalculate_attempt_score(bigint) to authenticated, service_role;
+grant execute on function public.get_student_available_exams() to authenticated, service_role;
+grant execute on function public.start_or_resume_exam(bigint, text, text) to authenticated, service_role;
+grant execute on function public.save_student_answer(bigint, bigint, jsonb, boolean, text) to authenticated, service_role;
+grant execute on function public.log_attempt_event(bigint, text, text) to authenticated, service_role;
+grant execute on function public.submit_exam_attempt(bigint, text) to authenticated, service_role;
+grant execute on function public.get_attempt_result(bigint) to authenticated, service_role;
+grant execute on function public.get_exam_preview(bigint) to authenticated, service_role;
