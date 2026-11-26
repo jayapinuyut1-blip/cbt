@@ -1,0 +1,24 @@
+name: Keep Supabase Awake
+
+# Menjalankan ping ringan setiap 3 hari sekali agar Supabase Free Tier
+# tidak mengalami auto-pause setelah 7 hari tanpa aktivitas.
+on:
+  schedule:
+    - cron: "0 2 */3 * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ] || [ -z "${{ secrets.SUPABASE_ANON_KEY }}" ]; then
+            echo "Secrets SUPABASE_URL / SUPABASE_ANON_KEY belum diisi di GitHub Repository Settings."
+            exit 0
+          fi
+          curl -fsS "${{ secrets.SUPABASE_URL }}/rest/v1/settings?select=kunci&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
+          echo ""
+          echo "Supabase keep-alive berhasil."

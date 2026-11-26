@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+:root {
+  --bg-surface: #f8fafc;
+  --text-main: #0f172a;
+}
+
+body {
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+}
+
+/* Mode Kontras Tinggi untuk Halaman Ujian Siswa */
+.high-contrast {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+.high-contrast .hc-card {
+  background-color: #111111 !important;
+  border-color: #facc15 !important;
+  color: #ffffff !important;
+}
+
+.high-contrast .hc-muted {
+  color: #e2e8f0 !important;
+}
+
+.high-contrast .hc-option {
+  background-color: #1a1a1a !important;
+  border-color: #ffffff !important;
+  color: #ffffff !important;
+}
+
+.high-contrast .hc-option-selected {
+  background-color: #facc15 !important;
+  border-color: #facc15 !important;
+  color: #000000 !important;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .print-break-inside-avoid {
+    break-inside: avoid;
+  }
+}

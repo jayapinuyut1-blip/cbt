@@ -1,0 +1,864 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import { SESSION_COOKIE_NAME } from "@/lib/auth-utils";
+import { formatCountdown, questionTypeLabel } from "@/lib/format";
+import type {
+  AnswerPayload,
+  ExamSessionPayload,
+  SanitizedQuestion,
+  SavedAnswerState,
+} from "@/types/cbt";
+import {
+  Clock,
+  Eye,
+  EyeOff,
+  Flag,
+  ChevronLeft,
+  ChevronRight,
+  CheckCircle2,
+  AlertTriangle,
+  Contrast,
+  Type,
+  Maximize,
+  Strikethrough,
+  Send,
+  Cloud,
+  Loader2,
+} from "lucide-react";
+
+function getClientSessionCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${SESSION_COOKIE_NAME}=`));
+  return match ? decodeURIComponent(match.split("=")[1]) : null;
+}
+
+function isQuestionAnswered(
+  q: SanitizedQuestion,
+  ans?: SavedAnswerState
+): boolean {
+  if (!ans || !ans.jawaban) return false;
+  if (q.tipe === "pg") return ans.jawaban.option_id != null;
+  if (q.tipe === "isian" || q.tipe === "essay") {
+    return typeof ans.jawaban.text === "string" && ans.jawaban.text.trim() !== "";
+  }
+  if (q.tipe === "jodoh") {
+    const pairs = ans.jawaban.pairs || {};
+    return Object.values(pairs).some((v) => v && v.trim() !== "");
+  }
+  return false;
+}
+
+export default function ExamWorkspace({
+  mode,
+  session,
+  onExitPreview,
+}: {
+  mode: "live" | "preview";
+  session: ExamSessionPayload;
+  onExitPreview?: () => void;
+}) {
+  const router = useRouter();
+  const supabase = createClient();
+
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, SavedAnswerState>>(
+    session.answers || {}
+  );
+  const [eliminated, setEliminated] = useState<Record<string, number[]>>({});
+  const [hideTimer, setHideTimer] = useState(false);
+  const [highContrast, setHighContrast] = useState(false);
+  const [textScale, setTextScale] = useState<number>(1); // 0 = sm, 1 = base, 2 = lg, 3 = xl
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [submitting, setSubmitting] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [conflictError, setConflictError] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Sinkronisasi waktu berbasis server (bukan jam lokal perangkat siswa)
+  const serverOffsetRef = useRef<number>(
+    new Date(session.server_now).getTime() - Date.now()
+  );
+  const deadlineMsRef = useRef<number>(new Date(session.deadline).getTime());
+
+  const [remainingSec, setRemainingSec] = useState<number>(() =>
+    Math.max(
+      0,
+      Math.floor(
+        (new Date(session.deadline).getTime() -
+          new Date(session.server_now).getTime()) /
+          1000
+      )
+    )
+  );
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSubmittedRef = useRef(false);
+
+  // Muat coretan opsi dari localStorage per attempt
+  useEffect(() => {
+    if (mode !== "live") return;
+    try {
+      const raw = localStorage.getItem(`cbt_elim_${session.attempt_id}`);
+      if (raw) setEliminated(JSON.parse(raw));
+    } catch {
+      // ignore
+    }
+  }, [mode, session.attempt_id]);
+
+  // Simpan coretan opsi ke localStorage
+  function toggleEliminate(questionId: number, optionId: number) {
+    setEliminated((prev) => {
+      const key = String(questionId);
+      const list = prev[key] || [];
+      const next = list.includes(optionId)
+        ? list.filter((id) => id !== optionId)
+        : [...list, optionId];
+      const updated = { ...prev, [key]: next };
+      if (mode === "live") {
+        try {
+          localStorage.setItem(
+            `cbt_elim_${session.attempt_id}`,
+            JSON.stringify(updated)
+          );
+        } catch {
+          // ignore
+        }
+      }
+      return updated;
+    });
+  }
+
+  // Kirim jawaban ke PostgreSQL RPC
+  const persistAnswer = useCallback(
+    async (questionId: number, jawaban: AnswerPayload, ragu: boolean) => {
+      if (mode !== "live") return;
+      setSaveStatus("saving");
+      const { data, error } = await supabase.rpc("save_student_answer", {
+        p_attempt_id: session.attempt_id,
+        p_question_id: questionId,
+        p_jawaban: jawaban,
+        p_ragu: ragu,
+        p_session_id: getClientSessionCookie(),
+      });
+
+      if (error) {
+        setSaveStatus("error");
+        const msg = error.message || "";
+        if (
+          msg.includes("SESSION_CONFLICT") ||
+          msg.includes("BLOCKED") ||
+          msg.includes("ATTEMPT_CLOSED")
+        ) {
+          setConflictError(msg);
+        } else if (msg.includes("TIME_EXPIRED")) {
+          router.push(`/siswa/hasil/${session.attempt_id}`);
+        }
+      } else {
+        setSaveStatus("saved");
+        // Sinkronisasi ulang deadline (kalau Admin baru saja klik +Tambah Waktu!)
+        if (data?.deadline && data?.server_now) {
+          serverOffsetRef.current =
+            new Date(data.server_now).getTime() - Date.now();
+          deadlineMsRef.current = new Date(data.deadline).getTime();
+        }
+      }
+    },
+    [mode, supabase, session.attempt_id, router]
+  );
+
+  function updateAnswer(
+    questionId: number,
+    nextJawaban: AnswerPayload,
+    nextRagu?: boolean,
+    debounce = false
+  ) {
+    const key = String(questionId);
+    const current = answers[key] || { jawaban: {}, ragu: false };
+    const raguVal = nextRagu !== undefined ? nextRagu : current.ragu;
+    const nextState: SavedAnswerState = { jawaban: nextJawaban, ragu: raguVal };
+
+    setAnswers((prev) => ({ ...prev, [key]: nextState }));
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (debounce) {
+      debounceRef.current = setTimeout(() => {
+        persistAnswer(questionId, nextJawaban, raguVal);
+      }, 900);
+    } else {
+      persistAnswer(questionId, nextJawaban, raguVal);
+    }
+  }
+
+  const handleSubmitExam = useCallback(async () => {
+    if (mode === "preview") {
+      alert("Ini adalah mode Pratinjau Guru. Tidak ada data yang disimpan.");
+      onExitPreview?.();
+      return;
+    }
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      // Pastikan soal aktif terakhir tersimpan
+      const activeQ = session.questions[currentIdx];
+      if (activeQ) {
+        const currAns = answers[String(activeQ.id)];
+        if (currAns) {
+          await supabase.rpc("save_student_answer", {
+            p_attempt_id: session.attempt_id,
+            p_question_id: activeQ.id,
+            p_jawaban: currAns.jawaban,
+            p_ragu: currAns.ragu,
+            p_session_id: getClientSessionCookie(),
+          });
+        }
+      }
+
+      const { error } = await supabase.rpc("submit_exam_attempt", {
+        p_attempt_id: session.attempt_id,
+        p_session_id: getClientSessionCookie(),
+      });
+      if (error) {
+        alert("Gagal mengumpulkan ujian: " + error.message);
+        setSubmitting(false);
+        return;
+      }
+
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+      router.push(`/siswa/hasil/${session.attempt_id}`);
+      router.refresh();
+    } catch {
+      alert("Terjadi kesalahan jaringan saat mengumpulkan ujian. Coba lagi.");
+      setSubmitting(false);
+    }
+  }, [
+    mode,
+    onExitPreview,
+    submitting,
+    session.questions,
+    session.attempt_id,
+    currentIdx,
+    answers,
+    supabase,
+    router,
+  ]);
+
+  // Countdown Timer Berbasis Waktu Server + Auto-Submit Saat Waktu Habis
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const serverNowMs = Date.now() + serverOffsetRef.current;
+      const diff = Math.max(
+        0,
+        Math.floor((deadlineMsRef.current - serverNowMs) / 1000)
+      );
+      setRemainingSec(diff);
+
+      if (diff <= 300 && diff > 0) {
+        // Paksa tampilkan timer saat sisa <= 5 menit
+        setHideTimer(false);
+      }
+
+      if (diff <= 0 && mode === "live" && !autoSubmittedRef.current) {
+        autoSubmittedRef.current = true;
+        handleSubmitExam();
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [mode, handleSubmitExam]);
+
+  // Pencatat Aktivitas (Hanya Mencatat, Tidak Memblokir — Sesuai PRD Bagian 6)
+  useEffect(() => {
+    if (mode !== "live") return;
+
+    function handleVisibility() {
+      if (document.hidden) {
+        supabase.rpc("log_attempt_event", {
+          p_attempt_id: session.attempt_id,
+          p_jenis: "pindah_tab",
+          p_session_id: getClientSessionCookie(),
+        });
+      }
+    }
+
+    function handleFullscreenChange() {
+      const inFs = Boolean(document.fullscreenElement);
+      setIsFullscreen(inFs);
+      if (!inFs) {
+        supabase.rpc("log_attempt_event", {
+          p_attempt_id: session.attempt_id,
+          p_jenis: "keluar_layar_penuh",
+          p_session_id: getClientSessionCookie(),
+        });
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, [mode, supabase, session.attempt_id]);
+
+  function requestFullscreen() {
+    document.documentElement.requestFullscreen?.().catch(() => {});
+  }
+
+  const question = session.questions[currentIdx];
+  const currentAns = question
+    ? answers[String(question.id)] || { jawaban: {}, ragu: false }
+    : { jawaban: {}, ragu: false };
+
+  const textSizeClass =
+    textScale === 0
+      ? "text-sm"
+      : textScale === 1
+      ? "text-base"
+      : textScale === 2
+      ? "text-lg"
+      : "text-xl";
+
+  const isLowTime = remainingSec <= 300;
+  const answeredCount = session.questions.filter((q) =>
+    isQuestionAnswered(q, answers[String(q.id)])
+  ).length;
+  const raguCount = session.questions.filter(
+    (q) => answers[String(q.id)]?.ragu
+  ).length;
+
+  const isSequential = session.exam.navigasi === "berurutan";
+
+  if (!question) {
+    return (
+      <div className="p-8 text-center text-slate-500">
+        Tidak ada soal pada ujian ini.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`min-h-screen flex flex-col ${
+        highContrast ? "high-contrast" : "bg-slate-50 text-slate-900"
+      }`}
+    >
+      {/* Banner Mode Pratinjau Guru */}
+      {mode === "preview" && (
+        <div className="bg-indigo-700 text-white px-4 py-2 text-xs sm:text-sm flex items-center justify-between">
+          <span>
+            <strong>MODE PRATINJAU GURU</strong> — Tampilan ini sama persis dengan layar ujian siswa.
+          </span>
+          <button
+            onClick={onExitPreview}
+            className="px-3 py-1 bg-white text-indigo-800 rounded font-semibold text-xs cursor-pointer"
+          >
+            Keluar Pratinjau
+          </button>
+        </div>
+      )}
+
+      {/* Banner Konflik Sesi / Diblokir */}
+      {conflictError && (
+        <div className="bg-red-600 text-white px-4 py-3 text-sm flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 shrink-0" />
+            <span>{conflictError}</span>
+          </div>
+          <button
+            onClick={() => router.push("/login")}
+            className="px-3 py-1 bg-white text-red-700 rounded font-semibold text-xs cursor-pointer"
+          >
+            Kembali ke Login
+          </button>
+        </div>
+      )}
+
+      {/* Header Ujian */}
+      <header className="sticky top-0 z-20 bg-white border-b border-slate-200 px-4 py-3 hc-card">
+        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="font-bold text-sm sm:text-base truncate">
+              {session.exam.judul}
+            </div>
+            <div className="text-xs text-slate-500 hc-muted">
+              {session.exam.mapel} • Soal {currentIdx + 1} dari{" "}
+              {session.questions.length}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Indikator Simpan Otomatis */}
+            {mode === "live" && (
+              <div className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
+                {saveStatus === "saving" ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                    <span>Menyimpan...</span>
+                  </>
+                ) : saveStatus === "error" ? (
+                  <span className="text-red-600 font-medium">Gagal simpan</span>
+                ) : (
+                  <>
+                    <Cloud className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Tersimpan</span>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Timer dengan opsi sembunyikan + peringatan 5 menit */}
+            <div
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-mono font-bold ${
+                isLowTime
+                  ? "bg-red-50 border-red-400 text-red-700 animate-pulse"
+                  : "bg-slate-100 border-slate-200 text-slate-800"
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              <span>
+                {hideTimer && !isLowTime
+                  ? "Disembunyikan"
+                  : formatCountdown(remainingSec)}
+              </span>
+              {!isLowTime && (
+                <button
+                  type="button"
+                  onClick={() => setHideTimer(!hideTimer)}
+                  title={hideTimer ? "Tampilkan Timer" : "Sembunyikan Timer"}
+                  className="ml-1 text-slate-500 hover:text-slate-900 cursor-pointer"
+                >
+                  {hideTimer ? (
+                    <Eye className="w-3.5 h-3.5" />
+                  ) : (
+                    <EyeOff className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              )}
+            </div>
+
+            {/* Kontrol Aksesibilitas: Ukuran Teks & Kontras Tinggi */}
+            <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setTextScale((s) => Math.max(0, s - 1))}
+                title="Perkecil Teks"
+                className="px-2 py-1.5 text-xs font-bold hover:bg-slate-100 cursor-pointer"
+              >
+                A-
+              </button>
+              <button
+                type="button"
+                onClick={() => setTextScale((s) => Math.min(3, s + 1))}
+                title="Perbesar Teks"
+                className="px-2 py-1.5 text-xs font-bold hover:bg-slate-100 border-l border-slate-200 cursor-pointer"
+              >
+                <Type className="w-3.5 h-3.5 inline mr-0.5" />+
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setHighContrast(!highContrast)}
+              title="Mode Kontras Tinggi"
+              className={`p-2 rounded-lg border cursor-pointer ${
+                highContrast
+                  ? "bg-yellow-400 text-black border-yellow-400"
+                  : "border-slate-200 hover:bg-slate-100"
+              }`}
+            >
+              <Contrast className="w-4 h-4" />
+            </button>
+
+            {mode === "live" && !isFullscreen && (
+              <button
+                type="button"
+                onClick={requestFullscreen}
+                title="Masuk Layar Penuh"
+                className="p-2 rounded-lg border border-slate-200 hover:bg-slate-100 cursor-pointer"
+              >
+                <Maximize className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Peringatan Sisa 5 Menit */}
+      {isLowTime && (
+        <div className="bg-red-600 text-white text-center text-xs sm:text-sm py-1.5 font-semibold px-4">
+          Perhatian: Sisa waktu kurang dari 5 menit! Jawaban akan terkumpul otomatis saat waktu habis.
+        </div>
+      )}
+
+      {/* Konten Utama: 1 Soal per Layar + Panel Nomor Soal */}
+      <div className="flex-1 max-w-6xl w-full mx-auto p-4 grid lg:grid-cols-12 gap-5 items-start">
+        {/* Area Soal */}
+        <section className="lg:col-span-8 bg-white rounded-2xl border border-slate-200 p-5 sm:p-7 space-y-5 hc-card">
+          <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-200">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-1 rounded-lg bg-blue-600 text-white font-bold text-sm">
+                Soal No. {currentIdx + 1}
+              </span>
+              <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                {questionTypeLabel(question.tipe)}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                updateAnswer(
+                  question.id,
+                  currentAns.jawaban,
+                  !currentAns.ragu,
+                  false
+                )
+              }
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition ${
+                currentAns.ragu
+                  ? "bg-amber-400 text-slate-900 border-amber-500"
+                  : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-amber-50"
+              }`}
+            >
+              <Flag className="w-3.5 h-3.5" />
+              {currentAns.ragu ? "Ditandai Ragu-ragu" : "Tandai Ragu-ragu"}
+            </button>
+          </div>
+
+          {/* Teks & Gambar Soal */}
+          <div className={`${textSizeClass} leading-relaxed whitespace-pre-wrap`}>
+            {question.teks}
+          </div>
+
+          {question.gambar && (
+            <div>
+              <img
+                src={question.gambar}
+                alt="Gambar soal"
+                className="max-h-80 rounded-xl border border-slate-200 object-contain"
+              />
+            </div>
+          )}
+
+          {/* Input Jawaban Sesuai 4 Tipe */}
+          {question.tipe === "pg" && (
+            <div className="space-y-2.5 pt-2">
+              {(question.options || []).map((opt, idx) => {
+                const letter = String.fromCharCode(65 + idx);
+                const selected = currentAns.jawaban.option_id === opt.id;
+                const isElim = (eliminated[String(question.id)] || []).includes(
+                  opt.id
+                );
+                return (
+                  <div key={opt.id} className="flex items-stretch gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateAnswer(
+                          question.id,
+                          { option_id: opt.id },
+                          undefined,
+                          false
+                        )
+                      }
+                      className={`flex-1 text-left px-4 py-3 rounded-xl border-2 flex items-start gap-3 transition cursor-pointer ${
+                        selected
+                          ? "border-blue-600 bg-blue-50 text-blue-950 font-medium hc-option-selected"
+                          : "border-slate-200 hover:border-blue-300 bg-white hc-option"
+                      } ${isElim ? "opacity-45 line-through" : ""}`}
+                    >
+                      <span
+                        className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                          selected
+                            ? "bg-blue-600 text-white"
+                            : "bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        {letter}
+                      </span>
+                      <span className={`${textSizeClass} pt-0.5`}>{opt.teks}</span>
+                    </button>
+
+                    {/* Tombol Coret Opsi (Bluebook-style) */}
+                    <button
+                      type="button"
+                      onClick={() => toggleEliminate(question.id, opt.id)}
+                      title={isElim ? "Batal Coret Opsi" : "Coret Opsi Salah"}
+                      className={`px-3 rounded-xl border text-xs flex items-center justify-center cursor-pointer ${
+                        isElim
+                          ? "bg-slate-800 text-white border-slate-800"
+                          : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      <Strikethrough className="w-4 h-4" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {question.tipe === "isian" && (
+            <div className="pt-2">
+              <label className="block text-xs font-medium text-slate-500 hc-muted mb-1.5">
+                Ketik jawaban singkat Anda:
+              </label>
+              <input
+                type="text"
+                value={currentAns.jawaban.text || ""}
+                onChange={(e) =>
+                  updateAnswer(
+                    question.id,
+                    { text: e.target.value },
+                    undefined,
+                    true
+                  )
+                }
+                placeholder="Tulis jawaban di sini..."
+                className={`w-full px-4 py-3 rounded-xl border-2 border-slate-300 focus:border-blue-600 focus:outline-none bg-white text-slate-900 ${textSizeClass}`}
+              />
+            </div>
+          )}
+
+          {question.tipe === "jodoh" && (
+            <div className="space-y-3 pt-2">
+              <div className="text-xs text-slate-500 hc-muted">
+                Pasangkan setiap pernyataan di sisi kiri dengan pilihan yang tepat di sisi kanan:
+              </div>
+              {(question.left_items || []).map((item, idx) => {
+                const pairs = currentAns.jawaban.pairs || {};
+                const selectedRight = pairs[String(item.id)] || "";
+                return (
+                  <div
+                    key={item.id}
+                    className="grid sm:grid-cols-12 gap-2.5 items-center p-3 rounded-xl border border-slate-200 bg-slate-50 hc-option"
+                  >
+                    <div className={`sm:col-span-6 font-medium ${textSizeClass}`}>
+                      {idx + 1}. {item.teks}
+                    </div>
+                    <div className="sm:col-span-6">
+                      <select
+                        value={selectedRight}
+                        onChange={(e) => {
+                          const nextPairs = {
+                            ...pairs,
+                            [String(item.id)]: e.target.value,
+                          };
+                          updateAnswer(
+                            question.id,
+                            { pairs: nextPairs },
+                            undefined,
+                            false
+                          );
+                        }}
+                        className="w-full px-3 py-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 text-sm"
+                      >
+                        <option value="">-- Pilih pasangan --</option>
+                        {(question.right_items || []).map((rText, rIdx) => (
+                          <option key={rIdx} value={rText}>
+                            {rText}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {question.tipe === "essay" && (
+            <div className="pt-2 space-y-1.5">
+              <label className="block text-xs font-medium text-slate-500 hc-muted">
+                Tuliskan jawaban uraian Anda:
+              </label>
+              <textarea
+                rows={7}
+                value={currentAns.jawaban.text || ""}
+                onChange={(e) =>
+                  updateAnswer(
+                    question.id,
+                    { text: e.target.value },
+                    undefined,
+                    true
+                  )
+                }
+                placeholder="Ketik jawaban lengkap di sini..."
+                className={`w-full px-4 py-3 rounded-xl border-2 border-slate-300 focus:border-blue-600 focus:outline-none bg-white text-slate-900 ${textSizeClass}`}
+              />
+              <div className="text-xs text-slate-400 text-right">
+                {(currentAns.jawaban.text || "").trim().split(/\s+/).filter(Boolean).length}{" "}
+                kata
+              </div>
+            </div>
+          )}
+
+          {/* Navigasi Sebelumnya / Berikutnya */}
+          <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+            <button
+              type="button"
+              disabled={currentIdx === 0 || isSequential}
+              onClick={() => setCurrentIdx((i) => Math.max(0, i - 1))}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-800 text-sm font-semibold cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Sebelumnya
+            </button>
+
+            {currentIdx < session.questions.length - 1 ? (
+              <button
+                type="button"
+                onClick={() =>
+                  setCurrentIdx((i) =>
+                    Math.min(session.questions.length - 1, i + 1)
+                  )
+                }
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold cursor-pointer"
+              >
+                Berikutnya
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(true)}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold cursor-pointer"
+              >
+                <Send className="w-4 h-4" />
+                Kumpulkan Ujian
+              </button>
+            )}
+          </div>
+        </section>
+
+        {/* Panel Daftar Nomor Soal */}
+        <aside className="lg:col-span-4 bg-white rounded-2xl border border-slate-200 p-5 space-y-4 hc-card">
+          <div>
+            <h2 className="font-bold text-sm">Daftar Nomor Soal</h2>
+            <p className="text-xs text-slate-500 hc-muted mt-0.5">
+              Terjawab: {answeredCount}/{session.questions.length} • Ragu:{" "}
+              {raguCount}
+            </p>
+            {isSequential && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
+                Mode Berurutan: Anda tidak dapat kembali ke nomor sebelumnya.
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-5 gap-2">
+            {session.questions.map((q, idx) => {
+              const st = answers[String(q.id)];
+              const answered = isQuestionAnswered(q, st);
+              const ragu = Boolean(st?.ragu);
+              const isCurrent = idx === currentIdx;
+              const disabled = isSequential && idx < currentIdx;
+
+              let btnStyle =
+                "bg-slate-50 border-slate-300 text-slate-700 hover:border-blue-400";
+              if (ragu) {
+                btnStyle = "bg-amber-400 border-amber-500 text-slate-900 font-bold";
+              } else if (answered) {
+                btnStyle =
+                  "bg-emerald-600 border-emerald-600 text-white font-bold";
+              }
+
+              return (
+                <button
+                  key={q.id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => setCurrentIdx(idx)}
+                  className={`h-10 rounded-lg border text-sm transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${btnStyle} ${
+                    isCurrent ? "ring-2 ring-blue-600 ring-offset-2" : ""
+                  }`}
+                >
+                  {idx + 1}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap gap-3 text-xs text-slate-500 hc-muted pt-2 border-t border-slate-200">
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-emerald-600 inline-block" />
+              Dijawab
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-amber-400 inline-block" />
+              Ragu-ragu
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded border border-slate-400 bg-slate-50 inline-block" />
+              Belum
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowConfirmModal(true)}
+            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            Selesai & Kumpulkan
+          </button>
+        </aside>
+      </div>
+
+      {/* Modal Konfirmasi Kumpulkan */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white text-slate-900 rounded-2xl max-w-md w-full p-6 space-y-4">
+            <h3 className="font-bold text-lg">Kumpulkan Ujian Sekarang?</h3>
+            <div className="text-sm text-slate-600 space-y-1.5">
+              <p>
+                Soal terjawab:{" "}
+                <strong>
+                  {answeredCount} dari {session.questions.length}
+                </strong>
+              </p>
+              {session.questions.length - answeredCount > 0 && (
+                <p className="text-amber-700 font-medium">
+                  Masih ada {session.questions.length - answeredCount} soal yang belum dijawab.
+                </p>
+              )}
+              {raguCount > 0 && (
+                <p className="text-amber-700">
+                  Masih ada {raguCount} soal ditandai ragu-ragu.
+                </p>
+              )}
+              <p className="text-xs text-slate-500 pt-1">
+                Setelah dikumpulkan, Anda tidak dapat mengubah jawaban lagi.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium cursor-pointer"
+              >
+                Periksa Lagi
+              </button>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={handleSubmitExam}
+                className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold cursor-pointer"
+              >
+                {submitting ? "Mengumpulkan..." : "Ya, Kumpulkan"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
