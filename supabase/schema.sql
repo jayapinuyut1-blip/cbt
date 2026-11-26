@@ -176,6 +176,14 @@ create table if not exists public.settings (
   nilai text not null default ''
 );
 
+-- Rate Limit Login Persisten (hanya diakses server via service_role)
+create table if not exists public.login_rate_limits (
+  rate_key text primary key,
+  attempts int not null default 0,
+  window_expires_at timestamptz not null
+);
+alter table public.login_rate_limits enable row level security;
+
 -- Indeks Performa
 create index if not exists idx_profiles_role on public.profiles(role);
 create index if not exists idx_profiles_kelas on public.profiles(kelas_id);

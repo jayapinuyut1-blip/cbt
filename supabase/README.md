@@ -22,8 +22,9 @@ Jalankan hanya patch yang belum pernah dijalankan, **berurutan**:
 | 4 | `patch_security_hardening.sql` | Kunci `recalculate_attempt_score`, single-session ketat |
 | 5 | `patch_exam_type_weights.sql` | Kolom `exams.bobot_tipe` + rumus nilai persentase per tipe |
 | 6 | `patch_exam_anticheat.sql` | Mode Ketat: `maks_pelanggaran`, kunci layar server-side |
+| 7 | `patch_login_rate_limit.sql` | Tabel `login_rate_limits` persisten (tahan lintas instance Vercel) |
 
-> Status produksi saat ini: patch **1–6 sudah dijalankan**.
+> Status produksi saat ini: patch **1–6 sudah dijalankan**; jalankan patch **7** untuk mengaktifkan rate-limit login persisten di database (sebelum dijalankan, sistem tetap aman dengan fallback in-memory).
 
 ## Catatan Rumus Nilai
 Rumus di `recalculate_attempt_score` (PostgreSQL) dicerminkan oleh

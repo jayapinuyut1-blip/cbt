@@ -4,6 +4,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
+import {
+  EditUserModal,
+  LoginCardsPrintView,
+  SyncAbsensiModal,
+  TeacherSubjectsModal,
+} from "@/components/admin/PenggunaModals";
 import type {
   Profile,
   SchoolClass,
@@ -38,52 +44,32 @@ export default function AdminPenggunaPage() {
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [bulkTargetClassId, setBulkTargetClassId] = useState<string>("");
   const [bulkProcessing, setBulkProcessing] = useState(false);
+
   const [users, setUsers] = useState<Profile[]>([]);
   const [classes, setClasses] = useState<SchoolClass[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [teacherSubjects, setTeacherSubjects] = useState<Record<string, number[]>>({});
+  const [teacherSubjects, setTeacherSubjects] = useState<
+    Record<string, number[]>
+  >({});
   const [settings, setSettings] = useState<SchoolSettings>({
     nama_sekolah: "SMK Negeri 3 Kotamobagu",
     logo: "",
     alamat_sekolah: "",
   });
 
-  // Modal Edit Pengguna (CRUD Update)
+  // Modals & tampilan cetak (logika form dikelola mandiri di PenggunaModals.tsx)
   const [editUser, setEditUser] = useState<Profile | null>(null);
-  const [editUsername, setEditUsername] = useState("");
-  const [editNama, setEditNama] = useState("");
-  const [editKelasId, setEditKelasId] = useState("");
-  const [editAktif, setEditAktif] = useState(true);
-  const [editBlocked, setEditBlocked] = useState(false);
-  const [editNewPassword, setEditNewPassword] = useState("");
-  const [savingEdit, setSavingEdit] = useState(false);
-
-  // Modal Pasangan Mapel Guru
   const [mapelModalUser, setMapelModalUser] = useState<Profile | null>(null);
-  const [selectedSubjectIds, setSelectedSubjectIds] = useState<number[]>([]);
-  const [savingSubjects, setSavingSubjects] = useState(false);
+  const [printMode, setPrintMode] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
 
-  // Form tambah satuan
+  // Form tambah satuan & impor Excel
   const [username, setUsername] = useState("");
   const [nama, setNama] = useState("");
   const [kelasId, setKelasId] = useState("");
   const [submitting, setSubmitting] = useState(false);
-
-  // Import Excel
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string>("");
-
-  // Mode cetak kartu login
-  const [printMode, setPrintMode] = useState(false);
-
-  // Sinkronisasi dari SMK3 Absensi
-  const [showSyncModal, setShowSyncModal] = useState(false);
-  const [syncAuthMode, setSyncAuthMode] = useState<"login" | "secret">("login");
-  const [absensiEmail, setAbsensiEmail] = useState("");
-  const [absensiPassword, setAbsensiPassword] = useState("");
-  const [absensiSecretKey, setAbsensiSecretKey] = useState("");
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState("");
 
   const loadData = useCallback(async () => {
     const [{ data: u }, { data: c }, { data: sub }, { data: ts }, { data: st }] =
@@ -207,50 +193,6 @@ export default function AdminPenggunaPage() {
     }
   }
 
-  function openEditModal(u: Profile) {
-    setEditUser(u);
-    setEditUsername(u.username);
-    setEditNama(u.nama);
-    setEditKelasId(u.kelas_id ? String(u.kelas_id) : "");
-    setEditAktif(u.aktif);
-    setEditBlocked(u.is_blocked);
-    setEditNewPassword("");
-  }
-
-  async function handleSaveEdit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!editUser) return;
-    setSavingEdit(true);
-    try {
-      const res = await fetch("/api/admin/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: editUser.id,
-          action: "update",
-          username: editUsername.trim(),
-          nama: editNama.trim(),
-          kelas_id:
-            editUser.role === "siswa" && editKelasId
-              ? Number(editKelasId)
-              : null,
-          aktif: editAktif,
-          is_blocked: editBlocked,
-          new_password: editNewPassword.trim() || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || "Gagal menyimpan perubahan.");
-      } else {
-        setEditUser(null);
-        loadData();
-      }
-    } finally {
-      setSavingEdit(false);
-    }
-  }
-
   async function handleBulkDeleteStudents() {
     if (selectedStudentIds.length === 0) return;
     if (
@@ -334,7 +276,9 @@ export default function AdminPenggunaPage() {
       });
       const data = await res.json();
       if (!res.ok || data.errorCount > 0) {
-        alert(data.errors?.[0]?.reason || data.error || "Gagal menambah user.");
+        alert(
+          data.errors?.[0]?.reason || data.error || "Gagal menambah user."
+        );
       } else {
         const pwd = data.created?.[0]?.password;
         alert(`Berhasil dibuat! Kata sandi awal: ${pwd}`);
@@ -351,8 +295,16 @@ export default function AdminPenggunaPage() {
     const sample =
       roleFilter === "siswa"
         ? [
-            { NIS: "2026001", Nama: "Budi Santoso", Kelas: classes[0]?.nama || "X ATPH 1" },
-            { NIS: "2026002", Nama: "Siti Aminah", Kelas: classes[0]?.nama || "X ATPH 1" },
+            {
+              NIS: "2026001",
+              Nama: "Budi Santoso",
+              Kelas: classes[0]?.nama || "X ATPH 1",
+            },
+            {
+              NIS: "2026002",
+              Nama: "Siti Aminah",
+              Kelas: classes[0]?.nama || "X ATPH 1",
+            },
           ]
         : [
             { Username: "guru01", Nama: "Drs. Ahmad Yani" },
@@ -360,7 +312,11 @@ export default function AdminPenggunaPage() {
           ];
     const ws = XLSX.utils.json_to_sheet(sample);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, roleFilter === "siswa" ? "Siswa" : "Guru");
+    XLSX.utils.book_append_sheet(
+      wb,
+      ws,
+      roleFilter === "siswa" ? "Siswa" : "Guru"
+    );
     XLSX.writeFile(wb, `template-impor-${roleFilter}.xlsx`);
   }
 
@@ -408,7 +364,9 @@ export default function AdminPenggunaPage() {
         loadData();
       }
     } catch {
-      setImportResult("Gagal membaca file Excel. Pastikan format sesuai template.");
+      setImportResult(
+        "Gagal membaca file Excel. Pastikan format sesuai template."
+      );
     } finally {
       setImporting(false);
       e.target.value = "";
@@ -449,157 +407,14 @@ export default function AdminPenggunaPage() {
     }
   }
 
-  function openMapelModal(guru: Profile) {
-    setMapelModalUser(guru);
-    setSelectedSubjectIds(teacherSubjects[guru.id] || []);
-  }
-
-  function toggleSubjectSelection(subjectId: number) {
-    setSelectedSubjectIds((prev) =>
-      prev.includes(subjectId)
-        ? prev.filter((id) => id !== subjectId)
-        : [...prev, subjectId]
-    );
-  }
-
-  async function saveTeacherSubjects() {
-    if (!mapelModalUser) return;
-    setSavingSubjects(true);
-    try {
-      const res = await fetch("/api/admin/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: mapelModalUser.id,
-          action: "set_subjects",
-          subject_ids: selectedSubjectIds,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(
-          data.error ||
-            "Gagal menyimpan pasangan mapel. Pastikan patch_teacher_subjects.sql sudah dijalankan di Supabase."
-        );
-      } else {
-        setMapelModalUser(null);
-        loadData();
-      }
-    } finally {
-      setSavingSubjects(false);
-    }
-  }
-
-  async function handleSyncAbsensi(e: React.FormEvent) {
-    e.preventDefault();
-    setSyncing(true);
-    setSyncMessage("");
-    try {
-      const payload =
-        syncAuthMode === "secret"
-          ? { secretKey: absensiSecretKey }
-          : { adminEmail: absensiEmail, adminPassword: absensiPassword };
-      const res = await fetch("/api/admin/sync-absensi", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setSyncMessage(`Gagal: ${data.error || "Kesalahan sinkronisasi."}`);
-      } else {
-        setSyncMessage(
-          `Sinkronisasi selesai! Kelas baru: ${data.classesAdded} (total ${data.totalClassesFound}), Guru baru: ${data.teachersCreated} (lewati: ${data.teachersSkipped}), Siswa baru: ${data.studentsCreated} (lewati: ${data.studentsSkipped}).`
-        );
-        loadData();
-      }
-    } catch {
-      setSyncMessage("Gagal menghubungi server.");
-    } finally {
-      setSyncing(false);
-    }
-  }
-
-  // Tampilan Cetak Kartu Login
   if (printMode) {
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between no-print bg-white p-4 rounded-xl border border-slate-200">
-          <div>
-            <h2 className="font-bold text-slate-900">Pratinjau Kartu Login</h2>
-            <p className="text-xs text-slate-500">
-              Menampilkan {filteredUsers.length} akun {roleFilter}. Klik Cetak untuk mencetak atau simpan PDF.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => window.print()}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium cursor-pointer"
-            >
-              <Printer className="w-4 h-4" /> Cetak Sekarang
-            </button>
-            <button
-              onClick={() => setPrintMode(false)}
-              className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-medium cursor-pointer"
-            >
-              Kembali
-            </button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {filteredUsers.map((u) => (
-            <div
-              key={u.id}
-              className="bg-white border-2 border-slate-800 rounded-lg p-4 print-break-inside-avoid"
-            >
-              <div className="flex items-center gap-3 border-b border-slate-300 pb-2 mb-3">
-                {settings.logo && (
-                  <img
-                    src={settings.logo}
-                    alt="Logo"
-                    className="w-10 h-10 object-contain"
-                  />
-                )}
-                <div>
-                  <div className="font-bold text-sm uppercase">
-                    KARTU LOGIN CBT
-                  </div>
-                  <div className="text-xs text-slate-600">
-                    {settings.nama_sekolah}
-                  </div>
-                </div>
-              </div>
-              <table className="w-full text-xs">
-                <tbody>
-                  <tr>
-                    <td className="py-0.5 text-slate-500 w-28">Nama</td>
-                    <td className="py-0.5 font-semibold">: {u.nama}</td>
-                  </tr>
-                  {u.role === "siswa" && (
-                    <tr>
-                      <td className="py-0.5 text-slate-500">Kelas</td>
-                      <td className="py-0.5">: {u.classes?.nama || "-"}</td>
-                    </tr>
-                  )}
-                  <tr>
-                    <td className="py-0.5 text-slate-500">
-                      {u.role === "siswa" ? "NIS / Login" : "Username"}
-                    </td>
-                    <td className="py-0.5 font-mono font-bold">: {u.username}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-0.5 text-slate-500">Sandi Awal</td>
-                    <td className="py-0.5 font-mono font-bold">
-                      : {u.kata_sandi_awal || "(Sudah diganti pengguna)"}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </div>
-      </div>
+      <LoginCardsPrintView
+        users={filteredUsers}
+        roleFilter={roleFilter}
+        settings={settings}
+        onBack={() => setPrintMode(false)}
+      />
     );
   }
 
@@ -611,15 +426,13 @@ export default function AdminPenggunaPage() {
             Kelola Siswa & Guru
           </h1>
           <p className="text-sm text-slate-500">
-            Tambah manual atau impor dari Excel, kata sandi awal dibuat otomatis dan kartu login dapat dicetak.
+            Tambah manual atau impor dari Excel, kata sandi awal dibuat otomatis
+            dan kartu login dapat dicetak.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => {
-              setSyncMessage("");
-              setShowSyncModal(true);
-            }}
+            onClick={() => setShowSyncModal(true)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium cursor-pointer"
           >
             <RefreshCw className="w-4 h-4" /> Tarik Data dari SMK3 Absensi
@@ -745,7 +558,11 @@ export default function AdminPenggunaPage() {
               Impor Massal {roleFilter} dari Excel
             </div>
             <p className="text-xs text-slate-500">
-              Kolom wajib: {roleFilter === "siswa" ? "NIS, Nama, Kelas (harus sesuai nama kelas di Master)" : "Username, Nama"}. Kata sandi awal dibuat otomatis.
+              Kolom wajib:{" "}
+              {roleFilter === "siswa"
+                ? "NIS, Nama, Kelas (harus sesuai nama kelas di Master)"
+                : "Username, Nama"}
+              . Kata sandi awal dibuat otomatis.
             </p>
             <div className="flex flex-wrap gap-2">
               <button
@@ -757,7 +574,9 @@ export default function AdminPenggunaPage() {
               </button>
               <label className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium cursor-pointer">
                 <Upload className="w-4 h-4" />
-                <span>{importing ? "Mengimpor..." : "Pilih File Excel (.xlsx)"}</span>
+                <span>
+                  {importing ? "Mengimpor..." : "Pilih File Excel (.xlsx)"}
+                </span>
                 <input
                   type="file"
                   accept=".xlsx,.xls,.csv"
@@ -776,7 +595,7 @@ export default function AdminPenggunaPage() {
         )}
       </div>
 
-      {/* Panel Aksi Massal Siswa: Pasangkan ke Jurusan/Kelas & Naik Kelas Otomatis */}
+      {/* Panel Aksi Massal Siswa */}
       {roleFilter === "siswa" && (
         <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-sm text-indigo-950">
@@ -784,7 +603,8 @@ export default function AdminPenggunaPage() {
             <span>
               <strong>{selectedStudentIds.length}</strong> siswa dipilih{" "}
               <span className="text-xs text-indigo-700">
-                (centang kotak di tabel bawah untuk pasangkan ke jurusan atau naik kelas massal)
+                (centang kotak di tabel bawah untuk pasangkan ke jurusan atau
+                naik kelas massal)
               </span>
             </span>
           </div>
@@ -805,7 +625,11 @@ export default function AdminPenggunaPage() {
 
             <button
               type="button"
-              disabled={bulkProcessing || selectedStudentIds.length === 0 || !bulkTargetClassId}
+              disabled={
+                bulkProcessing ||
+                selectedStudentIds.length === 0 ||
+                !bulkTargetClassId
+              }
               onClick={handleBulkAssignClass}
               className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-xs sm:text-sm font-semibold cursor-pointer"
             >
@@ -963,7 +787,7 @@ export default function AdminPenggunaPage() {
                     )}
                     {roleFilter === "guru" && (
                       <button
-                        onClick={() => openMapelModal(u)}
+                        onClick={() => setMapelModalUser(u)}
                         title="Atur Pasangan Mapel Guru"
                         className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-medium cursor-pointer"
                       >
@@ -971,7 +795,7 @@ export default function AdminPenggunaPage() {
                       </button>
                     )}
                     <button
-                      onClick={() => openEditModal(u)}
+                      onClick={() => setEditUser(u)}
                       title="Edit Data Pengguna"
                       className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-medium cursor-pointer"
                     >
@@ -1019,7 +843,10 @@ export default function AdminPenggunaPage() {
             ))}
             {filteredUsers.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                <td
+                  colSpan={7}
+                  className="px-4 py-8 text-center text-slate-400"
+                >
                   Belum ada data {roleFilter}.
                 </td>
               </tr>
@@ -1028,322 +855,36 @@ export default function AdminPenggunaPage() {
         </table>
       </div>
 
-      {/* Modal Edit Pengguna (CRUD Update) */}
       {editUser && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="font-bold text-lg text-slate-900">
-                Edit Data{" "}
-                {editUser.role === "siswa"
-                  ? "Siswa"
-                  : editUser.role === "guru"
-                  ? "Guru"
-                  : "Admin"}
-              </h2>
-              <button
-                onClick={() => setEditUser(null)}
-                className="text-sm text-slate-500 hover:text-slate-900 cursor-pointer"
-              >
-                Tutup
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveEdit} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  {editUser.role === "siswa" ? "NIS / Username" : "Username / NIP"}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editUsername}
-                  onChange={(e) => setEditUsername(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Nama Lengkap
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editNama}
-                  onChange={(e) => setEditNama(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                />
-              </div>
-
-              {editUser.role === "siswa" && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Kelas / Jurusan
-                  </label>
-                  <select
-                    value={editKelasId}
-                    onChange={(e) => setEditKelasId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                  >
-                    <option value="">-- Belum Punya Kelas --</option>
-                    {classes.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nama}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Ganti Kata Sandi Baru{" "}
-                  <span className="text-slate-400 font-normal">
-                    (Opsional — kosongkan jika tidak diubah)
-                  </span>
-                </label>
-                <input
-                  type="text"
-                  minLength={6}
-                  value={editNewPassword}
-                  onChange={(e) => setEditNewPassword(e.target.value)}
-                  placeholder="Minimal 6 karakter..."
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                />
-              </div>
-
-              <div className="flex flex-wrap gap-5 pt-1 text-sm">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={editAktif}
-                    onChange={(e) => setEditAktif(e.target.checked)}
-                  />
-                  <span>Akun Aktif (tidak lulus/nonaktif)</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={editBlocked}
-                    onChange={(e) => setEditBlocked(e.target.checked)}
-                  />
-                  <span className="text-rose-700">Diblokir</span>
-                </label>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setEditUser(null)}
-                  className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingEdit}
-                  className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-semibold cursor-pointer"
-                >
-                  {savingEdit ? "Menyimpan..." : "Simpan Perubahan"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <EditUserModal
+          user={editUser}
+          classes={classes}
+          onClose={() => setEditUser(null)}
+          onSaved={() => {
+            setEditUser(null);
+            loadData();
+          }}
+        />
       )}
 
-      {/* Modal Atur Pasangan Mapel Guru */}
       {mapelModalUser && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="font-bold text-lg text-slate-900">
-                  Atur Mapel Diampu
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Guru: <strong>{mapelModalUser.nama}</strong> ({mapelModalUser.username})
-                </p>
-              </div>
-              <button
-                onClick={() => setMapelModalUser(null)}
-                className="text-sm text-slate-500 hover:text-slate-900 cursor-pointer"
-              >
-                Tutup
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-500">
-              Centang mata pelajaran yang diampu guru ini. Setelah login, guru hanya dapat melihat bank soal, ujian, koreksi essay, dan nilai untuk mapel yang dipilih.
-            </p>
-
-            <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
-              {subjects.map((subj) => {
-                const checked = selectedSubjectIds.includes(subj.id);
-                return (
-                  <label
-                    key={subj.id}
-                    className={`flex items-center gap-3 px-3.5 py-2.5 text-sm cursor-pointer ${
-                      checked ? "bg-indigo-50/60" : "hover:bg-slate-50"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleSubjectSelection(subj.id)}
-                    />
-                    <span className="font-medium text-slate-800">
-                      {subj.nama}
-                    </span>
-                  </label>
-                );
-              })}
-              {subjects.length === 0 && (
-                <div className="p-4 text-center text-xs text-slate-400">
-                  Belum ada mata pelajaran. Tambahkan di menu Kelas, Mapel & TA.
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-xs text-slate-500">
-                {selectedSubjectIds.length} mapel dipilih
-              </span>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setMapelModalUser(null)}
-                  className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="button"
-                  disabled={savingSubjects}
-                  onClick={saveTeacherSubjects}
-                  className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-sm font-semibold cursor-pointer"
-                >
-                  {savingSubjects ? "Menyimpan..." : "Simpan Mapel"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <TeacherSubjectsModal
+          guru={mapelModalUser}
+          subjects={subjects}
+          initialSubjectIds={teacherSubjects[mapelModalUser.id] || []}
+          onClose={() => setMapelModalUser(null)}
+          onSaved={() => {
+            setMapelModalUser(null);
+            loadData();
+          }}
+        />
       )}
 
-      {/* Modal Sinkronisasi dari SMK3 Absensi */}
       {showSyncModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="font-bold text-lg text-slate-900">
-                Tarik Data dari SMK3 Absensi
-              </h2>
-              <button
-                onClick={() => setShowSyncModal(false)}
-                className="text-sm text-slate-500 hover:text-slate-900 cursor-pointer"
-              >
-                Tutup
-              </button>
-            </div>
-            <p className="text-xs text-slate-500">
-              Otomatis menyinkronkan <strong>Kelas</strong>, <strong>Guru</strong>, dan{" "}
-              <strong>Siswa</strong> (beserta kelasnya) dari database SMK3 Absensi, sekaligus membuatkan sandi awal siap cetak di Kartu Login.
-            </p>
-
-            <div className="flex gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => setSyncAuthMode("login")}
-                className={`flex-1 py-2 rounded-lg font-medium cursor-pointer ${
-                  syncAuthMode === "login"
-                    ? "bg-indigo-600 text-white"
-                    : "bg-slate-100 text-slate-700"
-                }`}
-              >
-                Login Admin Absensi
-              </button>
-              <button
-                type="button"
-                onClick={() => setSyncAuthMode("secret")}
-                className={`flex-1 py-2 rounded-lg font-medium cursor-pointer ${
-                  syncAuthMode === "secret"
-                    ? "bg-indigo-600 text-white"
-                    : "bg-slate-100 text-slate-700"
-                }`}
-              >
-                Secret Key Supabase
-              </button>
-            </div>
-
-            <form onSubmit={handleSyncAbsensi} className="space-y-3">
-              {syncAuthMode === "login" ? (
-                <>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Email Admin SMK3 Absensi
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      value={absensiEmail}
-                      onChange={(e) => setAbsensiEmail(e.target.value)}
-                      placeholder="admin@smkn3..."
-                      className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Password Admin SMK3 Absensi
-                    </label>
-                    <input
-                      type="password"
-                      required
-                      value={absensiPassword}
-                      onChange={(e) => setAbsensiPassword(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                    />
-                  </div>
-                </>
-              ) : (
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Secret / Service Role Key Supabase Absensi
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={absensiSecretKey}
-                    onChange={(e) => setAbsensiSecretKey(e.target.value)}
-                    placeholder="sb_secret_... atau eyJhbGci..."
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-                  />
-                </div>
-              )}
-
-              {syncMessage && (
-                <div
-                  className={`p-3 rounded-lg text-xs border ${
-                    syncMessage.startsWith("Gagal")
-                      ? "bg-red-50 border-red-200 text-red-700"
-                      : "bg-emerald-50 border-emerald-200 text-emerald-800"
-                  }`}
-                >
-                  {syncMessage}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={syncing}
-                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg text-sm font-semibold cursor-pointer"
-              >
-                {syncing ? "Menarik Data..." : "Mulai Sinkronisasi Sekarang"}
-              </button>
-            </form>
-          </div>
-        </div>
+        <SyncAbsensiModal
+          onClose={() => setShowSyncModal(false)}
+          onSynced={loadData}
+        />
       )}
     </div>
   );

@@ -2,29 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import crypto from "crypto";
 import { createServerSupabase, createAdminSupabase } from "@/lib/supabase/server";
 import { SESSION_COOKIE_NAME, usernameToEmail } from "@/lib/auth-utils";
-
-// Rate limit sederhana in-memory (per IP + username): maks 8 percobaan gagal / 5 menit
-const loginAttempts = new Map<string, { count: number; resetAt: number }>();
-
-function checkRateLimit(key: string): boolean {
-  const now = Date.now();
-  const entry = loginAttempts.get(key);
-  if (!entry || now > entry.resetAt) {
-    loginAttempts.set(key, { count: 0, resetAt: now + 5 * 60 * 1000 });
-    return true;
-  }
-  return entry.count < 8;
-}
-
-function recordFailure(key: string) {
-  const now = Date.now();
-  const entry = loginAttempts.get(key);
-  if (!entry || now > entry.resetAt) {
-    loginAttempts.set(key, { count: 1, resetAt: now + 5 * 60 * 1000 });
-  } else {
-    entry.count += 1;
-  }
-}
+import {
+  checkLoginRateLimit,
+  clearLoginRateLimit,
+  recordLoginFailure,
+} from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
@@ -39,10 +21,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const admin = createAdminSupabase();
     const ip =
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
     const rateKey = `${ip}:${username.toLowerCase()}`;
-    if (!checkRateLimit(rateKey)) {
+    const allowed = await checkLoginRateLimit(admin, rateKey);
+    if (!allowed) {
       return NextResponse.json(
         {
           error:
@@ -61,14 +45,13 @@ export async function POST(request: NextRequest) {
     });
 
     if (error || !data.user) {
-      recordFailure(rateKey);
+      await recordLoginFailure(admin, rateKey);
       return NextResponse.json(
         { error: "NIS / Username atau kata sandi salah." },
         { status: 401 }
       );
     }
 
-    const admin = createAdminSupabase();
     const { data: profile, error: profErr } = await admin
       .from("profiles")
       .select("*")
@@ -127,7 +110,7 @@ export async function POST(request: NextRequest) {
       .update({ active_session_id: sessionId })
       .eq("id", profile.id);
 
-    loginAttempts.delete(rateKey);
+    await clearLoginRateLimit(admin, rateKey);
 
     const redirectTo = profile.wajib_ganti_sandi
       ? "/ganti-sandi"
