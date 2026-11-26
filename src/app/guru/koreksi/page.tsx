@@ -12,7 +12,12 @@ import {
   type RemedialRule,
 } from "@/lib/remedial";
 import RemedialModal from "@/components/RemedialModal";
-import type { Exam, QuestionType } from "@/types/cbt";
+import {
+  analyzeItems,
+  summarizeAnalysis,
+  type AnalysisAnswerRow,
+} from "@/lib/item-analysis";
+import type { Exam } from "@/types/cbt";
 import {
   CheckCircle2,
   FileSpreadsheet,
@@ -46,60 +51,6 @@ interface EssayAnswerRow {
   } | null;
 }
 
-interface AllAnswerRow {
-  id: number;
-  attempt_id: number;
-  question_id: number;
-  jawaban: {
-    option_id?: number | null;
-    text?: string;
-    pairs?: Record<string, string>;
-  } | null;
-  skor: number | null;
-  questions: {
-    id: number;
-    teks: string;
-    bobot: number;
-    tipe: QuestionType;
-    question_options?: Array<{
-      id: number;
-      urutan: number;
-      teks: string;
-      pasangan: string | null;
-      benar: boolean;
-    }>;
-  } | null;
-}
-
-type DifficultyCategory = "Mudah" | "Sedang" | "Sulit" | "Belum Dinilai";
-
-interface QuestionItemAnalysis {
-  question_id: number;
-  tipe: QuestionType;
-  teks: string;
-  bobot: number;
-  responden: number;
-  gradedCount: number;
-  benarPenuh: number;
-  parsial: number;
-  salah: number;
-  belumDinilai: number;
-  tingkatPenguasaan: number | null; // 0..100%
-  kategori: DifficultyCategory;
-  optionStats: Array<{
-    id: number;
-    letter: string;
-    teks: string;
-    benar: boolean;
-    pickedCount: number;
-    pickedPct: number;
-  }>;
-  topDistractor: {
-    letter: string;
-    pickedPct: number;
-  } | null;
-}
-
 export default function GuruKoreksiPage() {
   const supabase = createClient();
   const [exams, setExams] = useState<Exam[]>([]);
@@ -110,7 +61,7 @@ export default function GuruKoreksiPage() {
   >("semua");
 
   const [essayRows, setEssayRows] = useState<EssayAnswerRow[]>([]);
-  const [allAnswerRows, setAllAnswerRows] = useState<AllAnswerRow[]>([]);
+  const [allAnswerRows, setAllAnswerRows] = useState<AnalysisAnswerRow[]>([]);
   const [scoreInputs, setScoreInputs] = useState<Record<number, string>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
   const [rawAttempts, setRawAttempts] = useState<RawStudentAttempt[]>([]);
@@ -205,7 +156,7 @@ export default function GuruKoreksiPage() {
 
     const list = (ans || []) as unknown as EssayAnswerRow[];
     setEssayRows(list);
-    setAllAnswerRows((allAns || []) as unknown as AllAnswerRow[]);
+    setAllAnswerRows((allAns || []) as unknown as AnalysisAnswerRow[]);
 
     const initialScores: Record<number, string> = {};
     list.forEach((row) => {
@@ -229,142 +180,12 @@ export default function GuruKoreksiPage() {
 
   const belowKkmList = aggregated.filter((a) => a.needs_remedial);
 
-  // Perhitungan Analisis Butir Soal Otomatis
-  const itemAnalysis = useMemo<QuestionItemAnalysis[]>(() => {
-    if (allAnswerRows.length === 0) return [];
-    const map = new Map<
-      number,
-      {
-        q: NonNullable<AllAnswerRow["questions"]>;
-        rows: AllAnswerRow[];
-      }
-    >();
-
-    for (const row of allAnswerRows) {
-      if (!row.questions) continue;
-      const existing = map.get(row.question_id);
-      if (existing) {
-        existing.rows.push(row);
-      } else {
-        map.set(row.question_id, { q: row.questions, rows: [row] });
-      }
-    }
-
-    const result: QuestionItemAnalysis[] = [];
-    for (const [qid, group] of map.entries()) {
-      const { q, rows } = group;
-      const bobot = Number(q.bobot) || 1;
-      const responden = rows.length;
-      let gradedCount = 0;
-      let benarPenuh = 0;
-      let parsial = 0;
-      let salah = 0;
-      let belumDinilai = 0;
-      let ratioSum = 0;
-
-      const optionPickCounts = new Map<number, number>();
-
-      for (const r of rows) {
-        if (q.tipe === "pg" && r.jawaban?.option_id != null) {
-          const oid = Number(r.jawaban.option_id);
-          optionPickCounts.set(oid, (optionPickCounts.get(oid) || 0) + 1);
-        }
-        if (r.skor === null || r.skor === undefined) {
-          belumDinilai += 1;
-        } else {
-          gradedCount += 1;
-          const sc = Number(r.skor);
-          ratioSum += Math.min(1, Math.max(0, sc / bobot));
-          if (sc >= bobot - 0.01) benarPenuh += 1;
-          else if (sc > 0) parsial += 1;
-          else salah += 1;
-        }
-      }
-
-      const tingkatPenguasaan =
-        gradedCount > 0
-          ? Math.round((ratioSum / gradedCount) * 1000) / 10
-          : null;
-
-      let kategori: DifficultyCategory = "Belum Dinilai";
-      if (tingkatPenguasaan !== null) {
-        if (tingkatPenguasaan > 75) kategori = "Mudah";
-        else if (tingkatPenguasaan >= 30) kategori = "Sedang";
-        else kategori = "Sulit";
-      }
-
-      const sortedOpts = [...(q.question_options || [])].sort(
-        (a, b) => a.urutan - b.urutan
-      );
-      const optionStats =
-        q.tipe === "pg"
-          ? sortedOpts.map((opt, idx) => {
-              const pickedCount = optionPickCounts.get(opt.id) || 0;
-              const pickedPct =
-                responden > 0
-                  ? Math.round((pickedCount / responden) * 1000) / 10
-                  : 0;
-              return {
-                id: opt.id,
-                letter: String.fromCharCode(65 + idx),
-                teks: opt.teks,
-                benar: opt.benar,
-                pickedCount,
-                pickedPct,
-              };
-            })
-          : [];
-
-      const wrongOpts = optionStats
-        .filter((o) => !o.benar && o.pickedCount > 0)
-        .sort((a, b) => b.pickedCount - a.pickedCount);
-      const topDistractor =
-        wrongOpts[0] && wrongOpts[0].pickedPct >= 25
-          ? { letter: wrongOpts[0].letter, pickedPct: wrongOpts[0].pickedPct }
-          : null;
-
-      result.push({
-        question_id: qid,
-        tipe: q.tipe,
-        teks: q.teks,
-        bobot,
-        responden,
-        gradedCount,
-        benarPenuh,
-        parsial,
-        salah,
-        belumDinilai,
-        tingkatPenguasaan,
-        kategori,
-        optionStats,
-        topDistractor,
-      });
-    }
-
-    return result.sort((a, b) => a.question_id - b.question_id);
-  }, [allAnswerRows]);
-
-  const analysisSummary = useMemo(() => {
-    const total = itemAnalysis.length;
-    const mudah = itemAnalysis.filter((i) => i.kategori === "Mudah").length;
-    const sedang = itemAnalysis.filter((i) => i.kategori === "Sedang").length;
-    const sulit = itemAnalysis.filter((i) => i.kategori === "Sulit").length;
-    const gradedItems = itemAnalysis.filter(
-      (i) => i.tingkatPenguasaan !== null
-    );
-    const avgPenguasaan =
-      gradedItems.length > 0
-        ? Math.round(
-            (gradedItems.reduce(
-              (acc, item) => acc + (item.tingkatPenguasaan || 0),
-              0
-            ) /
-              gradedItems.length) *
-              10
-          ) / 10
-        : null;
-    return { total, mudah, sedang, sulit, avgPenguasaan };
-  }, [itemAnalysis]);
+  // Analisis Butir Soal Otomatis (logika murni & teruji di src/lib/item-analysis.ts)
+  const itemAnalysis = useMemo(() => analyzeItems(allAnswerRows), [allAnswerRows]);
+  const analysisSummary = useMemo(
+    () => summarizeAnalysis(itemAnalysis),
+    [itemAnalysis]
+  );
 
   const filteredAnalysis = useMemo(() => {
     if (difficultyFilter === "semua") return itemAnalysis;
