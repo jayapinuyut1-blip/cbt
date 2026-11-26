@@ -38,9 +38,9 @@ export async function getCurrentUserProfile(): Promise<{
 
   const sessionMismatch = Boolean(
     profile.role === "siswa" &&
-      profile.active_session_id &&
-      localSessionId &&
-      profile.active_session_id !== localSessionId
+      (!profile.active_session_id ||
+        !localSessionId ||
+        profile.active_session_id !== localSessionId)
   );
 
   return { profile: profile as Profile, sessionMismatch };

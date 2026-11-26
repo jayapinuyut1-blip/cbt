@@ -22,6 +22,19 @@ export async function POST(request: Request) {
     }
 
     const admin = createAdminSupabase();
+    const { data: currProf } = await admin
+      .from("profiles")
+      .select("aktif, is_blocked")
+      .eq("id", user.id)
+      .single();
+
+    if (!currProf || !currProf.aktif || currProf.is_blocked) {
+      return NextResponse.json(
+        { error: "Akun tidak aktif atau sedang diblokir." },
+        { status: 403 }
+      );
+    }
+
     const { error: authErr } = await admin.auth.admin.updateUserById(user.id, {
       password: newPassword,
     });
