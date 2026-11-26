@@ -20,6 +20,7 @@ import {
   Menu,
   X,
 } from "lucide-react";
+import { getThemeMeta } from "@/lib/themes";
 import type { Profile, SchoolSettings } from "@/types/cbt";
 
 interface NavItem {
@@ -35,7 +36,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/pengguna", label: "Siswa & Guru", icon: Users },
   { href: "/admin/master", label: "Kelas, Mapel & TA", icon: BookOpen },
   { href: "/admin/nilai", label: "Rekap Nilai & Backup", icon: FileSpreadsheet },
-  { href: "/admin/pengaturan", label: "Identitas Sekolah", icon: Settings },
+  { href: "/admin/pengaturan", label: "Identitas & Tema", icon: Settings },
 ];
 
 const GURU_NAV: NavItem[] = [
@@ -73,6 +74,14 @@ export default function AppShell({
     .trim()
     .charAt(0)
     .toUpperCase();
+
+  // Sinkronkan atribut tema & meta theme-color browser dengan pengaturan sekolah terbaru
+  useEffect(() => {
+    const meta = getThemeMeta(settings.tema);
+    document.documentElement.dataset.theme = meta.id;
+    const tc = document.querySelector('meta[name="theme-color"]');
+    if (tc) tc.setAttribute("content", meta.themeColor);
+  }, [settings.tema]);
 
   // Tutup drawer otomatis saat berpindah halaman
   useEffect(() => {
@@ -119,13 +128,13 @@ export default function AppShell({
               onClick={onSelect}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition ${
                 active
-                  ? "bg-blue-50 text-blue-700 font-semibold ring-1 ring-blue-200/80 shadow-2xs"
-                  : "text-slate-600 font-medium hover:bg-slate-100 hover:text-slate-900"
+                  ? "cbt-nav-item-active font-semibold"
+                  : "cbt-nav-item font-medium"
               }`}
             >
               <Icon
                 className={`w-4 h-4 shrink-0 ${
-                  active ? "text-blue-600" : "text-slate-400"
+                  active ? "cbt-nav-icon-active" : "cbt-nav-icon"
                 }`}
               />
               <span className="truncate">{item.label}</span>
@@ -138,16 +147,16 @@ export default function AppShell({
 
   function renderProfileFooter(onSelect?: () => void) {
     return (
-      <div className="p-3 border-t border-slate-200 bg-slate-50/70 space-y-1.5">
-        <div className="px-2.5 py-2 rounded-xl bg-white border border-slate-200/80 flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
+      <div className="p-3 border-t cbt-sidebar-footer space-y-1.5">
+        <div className="px-2.5 py-2 rounded-xl border cbt-profile-card flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg cbt-avatar text-white font-bold text-xs flex items-center justify-center shrink-0">
             {userInitial}
           </div>
           <div className="min-w-0 text-xs">
-            <div className="font-semibold text-slate-800 truncate">
+            <div className="font-semibold cbt-profile-name truncate">
               {profile.nama}
             </div>
-            <div className="text-slate-500 truncate">
+            <div className="cbt-profile-sub truncate">
               {profile.username}
               {profile.classes?.nama ? ` • ${profile.classes.nama}` : ""}
             </div>
@@ -156,14 +165,14 @@ export default function AppShell({
         <Link
           href="/ganti-sandi"
           onClick={onSelect}
-          className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-200/60 hover:text-slate-900 transition"
+          className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium cbt-nav-item transition"
         >
-          <KeyRound className="w-4 h-4 text-slate-400" />
+          <KeyRound className="w-4 h-4 cbt-nav-icon" />
           <span>Ganti Kata Sandi</span>
         </Link>
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 transition cursor-pointer"
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium cbt-logout-btn transition cursor-pointer"
         >
           <LogOut className="w-4 h-4" />
           <span>Keluar</span>
@@ -173,10 +182,10 @@ export default function AppShell({
   }
 
   return (
-    <div className="min-h-[100dvh] flex bg-slate-50 text-slate-900">
-      {/* Sidebar Desktop (Tema Biru SMKN 3 konsisten dengan Mobile Topbar) */}
-      <aside className="hidden md:flex md:w-64 md:flex-col md:sticky md:top-0 md:h-[100dvh] bg-white border-r border-slate-200 shadow-xs no-print shrink-0">
-        <div className="px-4 py-3.5 bg-gradient-to-r from-blue-700 to-blue-600 text-white flex items-center gap-3">
+    <div className="min-h-[100dvh] flex cbt-canvas">
+      {/* Sidebar Desktop (mengikuti tema aktif secara penuh) */}
+      <aside className="hidden md:flex md:w-64 md:flex-col md:sticky md:top-0 md:h-[100dvh] cbt-sidebar border-r shadow-xs no-print shrink-0">
+        <div className="px-4 py-3.5 cbt-header text-white flex items-center gap-3">
           {settings.logo ? (
             <div className="w-9 h-9 rounded-lg bg-white/95 p-1 flex items-center justify-center shrink-0 shadow-xs">
               <img
@@ -194,7 +203,7 @@ export default function AppShell({
             <div className="font-bold text-sm leading-tight truncate">
               {settings.nama_sekolah}
             </div>
-            <div className="text-[11px] text-blue-100 uppercase tracking-wider font-medium mt-0.5">
+            <div className="text-[11px] text-white/80 uppercase tracking-wider font-medium mt-0.5">
               Panel {profile.role}
             </div>
           </div>
@@ -207,7 +216,7 @@ export default function AppShell({
       {/* Main Column */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Topbar Mobile (Sticky, tema warna & identitas identik dengan Desktop Sidebar) */}
-        <header className="md:hidden sticky top-0 z-30 bg-gradient-to-r from-blue-700 to-blue-600 text-white shadow-sm px-3.5 py-2.5 flex items-center justify-between gap-3 no-print">
+        <header className="md:hidden sticky top-0 z-30 cbt-header text-white shadow-sm px-3.5 py-2.5 flex items-center justify-between gap-3 no-print">
           <div className="flex items-center gap-2.5 min-w-0">
             {settings.logo ? (
               <div className="w-8 h-8 rounded-lg bg-white/95 p-1 flex items-center justify-center shrink-0 shadow-xs">
@@ -226,7 +235,7 @@ export default function AppShell({
               <div className="font-bold text-sm leading-tight truncate">
                 {settings.nama_sekolah}
               </div>
-              <div className="text-[10px] text-blue-100 uppercase tracking-wider font-medium">
+              <div className="text-[10px] text-white/80 uppercase tracking-wider font-medium truncate">
                 Panel {profile.role} • {profile.nama}
               </div>
             </div>
@@ -251,8 +260,8 @@ export default function AppShell({
               onClick={() => setOpen(false)}
               aria-hidden="true"
             />
-            <aside className="relative z-10 w-72 max-w-[85vw] h-[100dvh] bg-white shadow-2xl flex flex-col">
-              <div className="px-4 py-3.5 bg-gradient-to-r from-blue-700 to-blue-600 text-white flex items-center justify-between gap-2">
+            <aside className="relative z-10 w-72 max-w-[85vw] h-[100dvh] cbt-sidebar shadow-2xl flex flex-col">
+              <div className="px-4 py-3.5 cbt-header text-white flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
                   {settings.logo ? (
                     <div className="w-8 h-8 rounded-lg bg-white/95 p-1 flex items-center justify-center shrink-0">
@@ -271,7 +280,7 @@ export default function AppShell({
                     <div className="font-bold text-sm leading-tight truncate">
                       {settings.nama_sekolah}
                     </div>
-                    <div className="text-[11px] text-blue-100 uppercase tracking-wider">
+                    <div className="text-[11px] text-white/80 uppercase tracking-wider">
                       Panel {profile.role}
                     </div>
                   </div>

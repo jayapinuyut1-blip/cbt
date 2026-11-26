@@ -350,7 +350,7 @@ export default function ExamWorkspace({
   return (
     <div
       className={`min-h-[100dvh] flex flex-col ${
-        highContrast ? "high-contrast" : "bg-slate-50 text-slate-900"
+        highContrast ? "high-contrast" : "cbt-canvas"
       }`}
     >
       {/* Banner Mode Pratinjau Guru */}
@@ -386,8 +386,11 @@ export default function ExamWorkspace({
 
       {/* Header Ujian (Tema & aksen konsisten Desktop & Mobile) */}
       <header
+        style={
+          highContrast ? undefined : { borderTopColor: "var(--cbt-exam-top)" }
+        }
         className={`sticky top-0 z-20 bg-white border-b border-slate-200 border-t-[3px] px-3.5 sm:px-4 py-2.5 sm:py-3 shadow-2xs hc-card ${
-          highContrast ? "border-t-yellow-400" : "border-t-blue-600"
+          highContrast ? "border-t-yellow-400" : ""
         }`}
       >
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">

@@ -1,23 +1,271 @@
 @import "tailwindcss";
 
-:root {
+/* ============================================================================
+   SISTEM TEMA CBT SMKN 3 (Tersinkronisasi Desktop & Mobile via data-theme)
+   Default: Academic Navy & Gold (Selaras Logo SMK Negeri 3 Kotamobagu)
+   ============================================================================ */
+:root,
+[data-theme="navy-gold"] {
   color-scheme: light;
-  --brand-primary: #2563eb;
-  --brand-dark: #1d4ed8;
-  --bg-surface: #f8fafc;
-  --card-surface: #ffffff;
-  --border-subtle: #e2e8f0;
-  --text-main: #0f172a;
+  --cbt-bg: #f4f6fb;
+  --cbt-text: #0f172a;
+  --cbt-accent: #1e3a8a;
+  --cbt-accent-soft: #eef2ff;
+  --cbt-gold: #eab308;
+
+  --cbt-header-bg: linear-gradient(135deg, #0f2b5b 0%, #1e3a8a 100%);
+  --cbt-header-accent: #eab308;
+
+  --cbt-sidebar-bg: #ffffff;
+  --cbt-sidebar-border: #e2e8f0;
+  --cbt-sidebar-text: #475569;
+  --cbt-sidebar-hover-bg: #f1f5f9;
+  --cbt-sidebar-hover-text: #0f172a;
+  --cbt-nav-icon: #94a3b8;
+
+  --cbt-nav-active-bg: #eef2ff;
+  --cbt-nav-active-text: #1e3a8a;
+  --cbt-nav-active-ring: #c7d2fe;
+  --cbt-nav-icon-active: #1e3a8a;
+
+  --cbt-footer-bg: #f8fafc;
+  --cbt-profile-bg: #ffffff;
+  --cbt-profile-border: #e2e8f0;
+  --cbt-profile-name: #0f172a;
+  --cbt-profile-sub: #64748b;
+  --cbt-avatar-bg: linear-gradient(135deg, #0f2b5b 0%, #1e3a8a 100%);
+  --cbt-logout-text: #dc2626;
+  --cbt-logout-hover: #fef2f2;
+
+  --cbt-btn-bg: linear-gradient(135deg, #0f2b5b 0%, #1e3a8a 100%);
+  --cbt-btn-hover: linear-gradient(135deg, #0b2046 0%, #172e70 100%);
+  --cbt-auth-bg: radial-gradient(circle at 12% 14%, rgba(234, 179, 8, 0.14), transparent 36%),
+    radial-gradient(circle at 88% 82%, rgba(30, 58, 138, 0.14), transparent 42%),
+    linear-gradient(135deg, #f4f6fb 0%, #eaf0fa 100%);
+  --cbt-auth-card-bg: #ffffff;
+  --cbt-auth-bar: linear-gradient(90deg, #0f2b5b 0%, #1e3a8a 68%, #eab308 100%);
+  --cbt-exam-top: #0f2b5b;
+}
+
+/* Tema 2: Pro SaaS Dark-Chrome (Sidebar & Topbar Gelap, Konten Terang) */
+[data-theme="dark-saas"] {
+  color-scheme: light;
+  --cbt-bg: #f8fafc;
+  --cbt-text: #0f172a;
+  --cbt-accent: #2563eb;
+  --cbt-accent-soft: #eff6ff;
+  --cbt-gold: #38bdf8;
+
+  --cbt-header-bg: linear-gradient(135deg, #0b1120 0%, #1e293b 100%);
+  --cbt-header-accent: #38bdf8;
+
+  --cbt-sidebar-bg: #0f172a;
+  --cbt-sidebar-border: #1e293b;
+  --cbt-sidebar-text: #cbd5e1;
+  --cbt-sidebar-hover-bg: rgba(255, 255, 255, 0.08);
+  --cbt-sidebar-hover-text: #ffffff;
+  --cbt-nav-icon: #94a3b8;
+
+  --cbt-nav-active-bg: #2563eb;
+  --cbt-nav-active-text: #ffffff;
+  --cbt-nav-active-ring: #3b82f6;
+  --cbt-nav-icon-active: #ffffff;
+
+  --cbt-footer-bg: #0b1120;
+  --cbt-profile-bg: #1e293b;
+  --cbt-profile-border: #334155;
+  --cbt-profile-name: #f8fafc;
+  --cbt-profile-sub: #94a3b8;
+  --cbt-avatar-bg: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
+  --cbt-logout-text: #fca5a5;
+  --cbt-logout-hover: rgba(239, 68, 68, 0.14);
+
+  --cbt-btn-bg: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  --cbt-btn-hover: linear-gradient(135deg, #020617 0%, #0f172a 100%);
+  --cbt-auth-bg: radial-gradient(circle at 18% 18%, rgba(56, 189, 248, 0.14), transparent 40%),
+    radial-gradient(circle at 85% 80%, rgba(15, 23, 42, 0.14), transparent 45%),
+    linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+  --cbt-auth-card-bg: #ffffff;
+  --cbt-auth-bar: linear-gradient(90deg, #0f172a 0%, #2563eb 75%, #38bdf8 100%);
+  --cbt-exam-top: #0f172a;
+}
+
+/* Tema 3: Soft Glass & Mesh Gradient (Modern Tech / Gen-Z) */
+[data-theme="soft-glass"] {
+  color-scheme: light;
+  --cbt-bg: #eff6ff;
+  --cbt-text: #0f172a;
+  --cbt-accent: #4f46e5;
+  --cbt-accent-soft: #eef2ff;
+  --cbt-gold: #06b6d4;
+
+  --cbt-header-bg: linear-gradient(135deg, #2563eb 0%, #4f46e5 65%, #0ea5e9 100%);
+  --cbt-header-accent: #38bdf8;
+
+  --cbt-sidebar-bg: rgba(255, 255, 255, 0.9);
+  --cbt-sidebar-border: #dbeafe;
+  --cbt-sidebar-text: #475569;
+  --cbt-sidebar-hover-bg: #eff6ff;
+  --cbt-sidebar-hover-text: #1e3a8a;
+  --cbt-nav-icon: #94a3b8;
+
+  --cbt-nav-active-bg: linear-gradient(135deg, #eff6ff 0%, #eef2ff 100%);
+  --cbt-nav-active-text: #4338ca;
+  --cbt-nav-active-ring: #c7d2fe;
+  --cbt-nav-icon-active: #4f46e5;
+
+  --cbt-footer-bg: rgba(239, 246, 255, 0.75);
+  --cbt-profile-bg: rgba(255, 255, 255, 0.95);
+  --cbt-profile-border: #dbeafe;
+  --cbt-profile-name: #0f172a;
+  --cbt-profile-sub: #64748b;
+  --cbt-avatar-bg: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+  --cbt-logout-text: #dc2626;
+  --cbt-logout-hover: #fef2f2;
+
+  --cbt-btn-bg: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+  --cbt-btn-hover: linear-gradient(135deg, #1d4ed8 0%, #4338ca 100%);
+  --cbt-auth-bg: radial-gradient(circle at 15% 18%, rgba(56, 189, 248, 0.28), transparent 42%),
+    radial-gradient(circle at 86% 22%, rgba(99, 102, 241, 0.24), transparent 42%),
+    radial-gradient(circle at 52% 88%, rgba(59, 130, 246, 0.2), transparent 46%),
+    #f0f7ff;
+  --cbt-auth-card-bg: rgba(255, 255, 255, 0.88);
+  --cbt-auth-bar: linear-gradient(90deg, #06b6d4 0%, #2563eb 50%, #4f46e5 100%);
+  --cbt-exam-top: #4f46e5;
+}
+
+/* Tema 4: Warm Paper Eye-Care (Anti-Lelah Mata — Gaya Editorial Modern) */
+[data-theme="warm-paper"] {
+  color-scheme: light;
+  --cbt-bg: #faf8f4;
+  --cbt-text: #1c1917;
+  --cbt-accent: #047857;
+  --cbt-accent-soft: #ecfdf5;
+  --cbt-gold: #d97706;
+
+  --cbt-header-bg: linear-gradient(135deg, #064e3b 0%, #047857 100%);
+  --cbt-header-accent: #f59e0b;
+
+  --cbt-sidebar-bg: #fffdf9;
+  --cbt-sidebar-border: #e7e5e0;
+  --cbt-sidebar-text: #57534e;
+  --cbt-sidebar-hover-bg: #f5f2eb;
+  --cbt-sidebar-hover-text: #1c1917;
+  --cbt-nav-icon: #a8a29e;
+
+  --cbt-nav-active-bg: #ecfdf5;
+  --cbt-nav-active-text: #065f46;
+  --cbt-nav-active-ring: #a7f3d0;
+  --cbt-nav-icon-active: #047857;
+
+  --cbt-footer-bg: #f6f3ec;
+  --cbt-profile-bg: #fffdf9;
+  --cbt-profile-border: #e7e5e0;
+  --cbt-profile-name: #1c1917;
+  --cbt-profile-sub: #78716c;
+  --cbt-avatar-bg: linear-gradient(135deg, #065f46 0%, #047857 100%);
+  --cbt-logout-text: #b91c1c;
+  --cbt-logout-hover: #fef2f2;
+
+  --cbt-btn-bg: linear-gradient(135deg, #065f46 0%, #047857 100%);
+  --cbt-btn-hover: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
+  --cbt-auth-bg: radial-gradient(circle at 16% 18%, rgba(16, 185, 129, 0.14), transparent 40%),
+    radial-gradient(circle at 86% 84%, rgba(217, 119, 6, 0.12), transparent 44%),
+    linear-gradient(135deg, #faf8f4 0%, #f3efe6 100%);
+  --cbt-auth-card-bg: #fffdf9;
+  --cbt-auth-bar: linear-gradient(90deg, #064e3b 0%, #047857 70%, #f59e0b 100%);
+  --cbt-exam-top: #047857;
 }
 
 html,
 body {
-  background-color: var(--bg-surface);
-  color: var(--text-main);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    sans-serif;
+  background-color: var(--cbt-bg);
+  color: var(--cbt-text);
+  font-family: var(--font-jakarta), system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
   overflow-x: clip;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Helper Kelas Tema */
+.cbt-canvas {
+  background-color: var(--cbt-bg);
+  color: var(--cbt-text);
+}
+
+.cbt-header {
+  background: var(--cbt-header-bg);
+  border-bottom: 2px solid var(--cbt-header-accent);
+}
+
+.cbt-sidebar {
+  background: var(--cbt-sidebar-bg);
+  border-color: var(--cbt-sidebar-border);
+  backdrop-filter: blur(12px);
+}
+
+.cbt-nav-item {
+  color: var(--cbt-sidebar-text);
+}
+.cbt-nav-item:hover {
+  background: var(--cbt-sidebar-hover-bg);
+  color: var(--cbt-sidebar-hover-text);
+}
+.cbt-nav-item-active {
+  background: var(--cbt-nav-active-bg);
+  color: var(--cbt-nav-active-text);
+  box-shadow: inset 0 0 0 1px var(--cbt-nav-active-ring);
+}
+
+.cbt-nav-icon {
+  color: var(--cbt-nav-icon);
+}
+.cbt-nav-icon-active {
+  color: var(--cbt-nav-icon-active);
+}
+
+.cbt-sidebar-footer {
+  background: var(--cbt-footer-bg);
+  border-color: var(--cbt-sidebar-border);
+}
+
+.cbt-profile-card {
+  background: var(--cbt-profile-bg);
+  border-color: var(--cbt-profile-border);
+}
+.cbt-profile-name {
+  color: var(--cbt-profile-name);
+}
+.cbt-profile-sub {
+  color: var(--cbt-profile-sub);
+}
+.cbt-avatar {
+  background: var(--cbt-avatar-bg);
+}
+.cbt-logout-btn {
+  color: var(--cbt-logout-text);
+}
+.cbt-logout-btn:hover {
+  background: var(--cbt-logout-hover);
+}
+
+.cbt-btn-primary {
+  background: var(--cbt-btn-bg);
+  color: #ffffff;
+}
+.cbt-btn-primary:hover {
+  background: var(--cbt-btn-hover);
+}
+
+.cbt-auth-canvas {
+  background: var(--cbt-auth-bg);
+}
+.cbt-auth-card {
+  background: var(--cbt-auth-card-bg);
+  backdrop-filter: blur(14px);
+}
+.cbt-auth-bar {
+  background: var(--cbt-auth-bar);
 }
 
 /* Pastikan input/select/textarea tetap konsisten terang di browser mobile dark-mode */

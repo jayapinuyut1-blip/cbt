@@ -48,12 +48,12 @@ export default function GantiSandiPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] flex items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
-        <div className="h-1.5 bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-600" />
+    <div className="min-h-[100dvh] flex items-center justify-center cbt-auth-canvas p-4">
+      <div className="w-full max-w-md cbt-auth-card rounded-2xl shadow-xl border border-slate-200/80 overflow-hidden">
+        <div className="h-1.5 cbt-auth-bar" />
         <div className="p-6 sm:p-8">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-xl cbt-avatar text-white flex items-center justify-center shrink-0">
             <KeyRound className="w-5 h-5" />
           </div>
           <div>
@@ -107,7 +107,7 @@ export default function GantiSandiPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-800 hover:to-blue-700 disabled:opacity-60 text-white font-semibold rounded-lg text-sm cursor-pointer shadow-xs"
+              className="w-full py-2.5 cbt-btn-primary disabled:opacity-60 font-semibold rounded-lg text-sm cursor-pointer shadow-xs"
             >
               {loading ? "Menyimpan..." : "Simpan Kata Sandi Baru"}
             </button>

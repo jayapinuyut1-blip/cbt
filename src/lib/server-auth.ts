@@ -1,7 +1,9 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { createClient as createSupabaseJsClient } from "@supabase/supabase-js";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { SESSION_COOKIE_NAME } from "@/lib/auth-utils";
+import { DEFAULT_THEME_ID, normalizeThemeId } from "@/lib/themes";
 import type { Profile, SchoolSettings, UserRole } from "@/types/cbt";
 
 function isSupabaseConfigured(): boolean {
@@ -67,15 +69,22 @@ export async function requireRole(allowedRoles: UserRole[]): Promise<Profile> {
 }
 
 export async function getSchoolSettings(): Promise<SchoolSettings> {
+  const fallback: SchoolSettings = {
+    nama_sekolah: "SMK Negeri 3 Kotamobagu",
+    logo: "",
+    alamat_sekolah: "",
+    tema: DEFAULT_THEME_ID,
+  };
   if (!isSupabaseConfigured()) {
-    return {
-      nama_sekolah: "SMK Negeri 3 Kotamobagu",
-      logo: "",
-      alamat_sekolah: "",
-    };
+    return fallback;
   }
   try {
-    const supabase = await createServerSupabase();
+    // Gunakan anon client ringan tanpa cookies() agar aman dipanggil dari RootLayout / generateViewport
+    const supabase = createSupabaseJsClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { auth: { persistSession: false, autoRefreshToken: false } }
+    );
     const { data } = await supabase.from("settings").select("kunci, nilai");
     const map: Record<string, string> = {};
     (data || []).forEach((row) => {
@@ -85,12 +94,9 @@ export async function getSchoolSettings(): Promise<SchoolSettings> {
       nama_sekolah: map.nama_sekolah || "SMK Negeri 3 Kotamobagu",
       logo: map.logo || "",
       alamat_sekolah: map.alamat_sekolah || "",
+      tema: normalizeThemeId(map.tema),
     };
   } catch {
-    return {
-      nama_sekolah: "SMK Negeri 3 Kotamobagu",
-      logo: "",
-      alamat_sekolah: "",
-    };
+    return fallback;
   }
 }

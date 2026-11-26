@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { GraduationCap, Lock, User, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { getThemeMeta } from "@/lib/themes";
 import type { SchoolSettings } from "@/types/cbt";
 
 export default function LoginForm({
@@ -18,6 +19,13 @@ export default function LoginForm({
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(initialError);
+
+  useEffect(() => {
+    const meta = getThemeMeta(settings.tema);
+    document.documentElement.dataset.theme = meta.id;
+    const tc = document.querySelector('meta[name="theme-color"]');
+    if (tc) tc.setAttribute("content", meta.themeColor);
+  }, [settings.tema]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -44,9 +52,9 @@ export default function LoginForm({
   }
 
   return (
-    <div className="min-h-[100dvh] flex items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-indigo-100 p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
-        <div className="h-1.5 bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-600" />
+    <div className="min-h-[100dvh] flex items-center justify-center cbt-auth-canvas p-4">
+      <div className="w-full max-w-md cbt-auth-card rounded-2xl shadow-xl border border-slate-200/80 overflow-hidden">
+        <div className="h-1.5 cbt-auth-bar" />
         <div className="p-6 sm:p-8">
         <div className="flex flex-col items-center text-center mb-6">
           {settings.logo ? (
@@ -56,7 +64,7 @@ export default function LoginForm({
               className="w-16 h-16 object-contain mb-3"
             />
           ) : (
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-700 to-blue-600 text-white flex items-center justify-center mb-3 shadow-md">
+            <div className="w-14 h-14 rounded-2xl cbt-avatar text-white flex items-center justify-center mb-3 shadow-md">
               <GraduationCap className="w-8 h-8" />
             </div>
           )}
@@ -127,7 +135,7 @@ export default function LoginForm({
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 px-4 bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-800 hover:to-blue-700 disabled:opacity-60 text-white font-semibold rounded-lg text-sm transition cursor-pointer shadow-xs"
+            className="w-full py-2.5 px-4 cbt-btn-primary disabled:opacity-60 font-semibold rounded-lg text-sm transition cursor-pointer shadow-xs"
           >
             {loading ? "Memverifikasi..." : "Masuk"}
           </button>
