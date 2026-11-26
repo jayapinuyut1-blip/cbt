@@ -30,6 +30,9 @@ interface AttemptRow {
   nilai: number | null;
   nilai_sementara: number | null;
   extra_minutes: number;
+  pelanggaran_count?: number;
+  is_locked?: boolean;
+  locked_reason?: string | null;
   question_order: unknown[];
   last_active_at: string;
 }
@@ -37,7 +40,13 @@ interface AttemptRow {
 interface LogRow {
   id: number;
   attempt_id: number;
-  jenis: "pindah_tab" | "keluar_layar_penuh" | "reset_login";
+  jenis:
+    | "pindah_tab"
+    | "keluar_layar_penuh"
+    | "split_screen"
+    | "copy_paste"
+    | "reset_login"
+    | "buka_kunci";
   waktu: string;
 }
 
@@ -209,6 +218,11 @@ export default function AdminMonitoringPage() {
     mengerjakan: students.filter(
       (s) => latestAttemptByStudent.get(s.id)?.status === "mengerjakan"
     ).length,
+    terkunci: students.filter(
+      (s) =>
+        latestAttemptByStudent.get(s.id)?.status === "mengerjakan" &&
+        Boolean(latestAttemptByStudent.get(s.id)?.is_locked)
+    ).length,
     selesai: students.filter((s) => {
       const st = latestAttemptByStudent.get(s.id)?.status;
       return st === "selesai" || st === "menunggu_koreksi";
@@ -294,7 +308,7 @@ export default function AdminMonitoringPage() {
       </div>
 
       {/* Ringkasan Status */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="text-xs text-slate-500">Belum Mulai</div>
           <div className="text-2xl font-bold text-slate-700">{summary.belum}</div>
@@ -303,6 +317,18 @@ export default function AdminMonitoringPage() {
           <div className="text-xs text-amber-700">Sedang Mengerjakan</div>
           <div className="text-2xl font-bold text-amber-700">
             {summary.mengerjakan}
+          </div>
+        </div>
+        <div
+          className={`bg-white rounded-xl border p-4 ${
+            summary.terkunci > 0 ? "border-rose-400 bg-rose-50/40" : "border-rose-200"
+          }`}
+        >
+          <div className="text-xs text-rose-700 font-semibold">
+            Layar Terkunci (Curang)
+          </div>
+          <div className="text-2xl font-bold text-rose-700">
+            {summary.terkunci}
           </div>
         </div>
         <div className="bg-white rounded-xl border border-emerald-200 p-4">
@@ -348,11 +374,23 @@ export default function AdminMonitoringPage() {
                 : [];
               const warnCount = attLogs.filter(
                 (l) =>
-                  l.jenis === "pindah_tab" || l.jenis === "keluar_layar_penuh"
+                  l.jenis === "pindah_tab" ||
+                  l.jenis === "keluar_layar_penuh" ||
+                  l.jenis === "split_screen"
               ).length;
+              const isLocked = Boolean(att?.is_locked && att.status === "mengerjakan");
 
               return (
-                <tr key={st.id} className={st.is_blocked ? "bg-red-50/40" : ""}>
+                <tr
+                  key={st.id}
+                  className={
+                    isLocked
+                      ? "bg-rose-50/70"
+                      : st.is_blocked
+                      ? "bg-red-50/40"
+                      : ""
+                  }
+                >
                   <td className="px-4 py-2.5">
                     <div className="font-medium text-slate-900">{st.nama}</div>
                     <div className="text-xs text-slate-500">
@@ -376,12 +414,20 @@ export default function AdminMonitoringPage() {
                           Belum Mulai
                         </span>
                       ) : att.status === "mengerjakan" ? (
-                        <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-800 font-medium">
-                          Mengerjakan
-                          {att.extra_minutes > 0
-                            ? ` (+${att.extra_minutes}m)`
-                            : ""}
-                        </span>
+                        <>
+                          {isLocked ? (
+                            <span className="px-2 py-0.5 text-xs rounded-full bg-rose-600 text-white font-bold animate-pulse">
+                              TERKUNCI ({att.pelanggaran_count || warnCount}x)
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-800 font-medium">
+                              Mengerjakan
+                              {att.extra_minutes > 0
+                                ? ` (+${att.extra_minutes}m)`
+                                : ""}
+                            </span>
+                          )}
+                        </>
                       ) : att.status === "menunggu_koreksi" ? (
                         <span className="px-2 py-0.5 text-xs rounded-full bg-indigo-100 text-indigo-800">
                           Menunggu Koreksi
@@ -436,6 +482,23 @@ export default function AdminMonitoringPage() {
 
                       {att && att.status === "mengerjakan" && (
                         <>
+                          {isLocked && (
+                            <button
+                              onClick={() =>
+                                doAction(
+                                  {
+                                    action: "unlock_attempt",
+                                    attempt_id: att.id,
+                                  },
+                                  `Buka kunci layar ujian untuk ${st.nama}? (Hitungan pelanggaran akan direset ke 0 agar siswa dapat melanjutkan)`,
+                                  `Kunci layar ${st.nama} berhasil dibuka.`
+                                )
+                              }
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer shadow-2xs"
+                            >
+                              <Unlock className="w-3.5 h-3.5" /> Buka Kunci
+                            </button>
+                          )}
                           <button
                             onClick={() => {
                               const m = prompt("Tambah waktu berapa menit?", "10");
@@ -559,9 +622,15 @@ export default function AdminMonitoringPage() {
                 <div key={l.id} className="py-2 flex items-center justify-between">
                   <span className="font-medium text-slate-800">
                     {l.jenis === "pindah_tab"
-                      ? "Berpindah Tab / Jendela"
+                      ? "Berpindah Tab / Jendela / Minimize"
                       : l.jenis === "keluar_layar_penuh"
                       ? "Keluar Layar Penuh"
+                      : l.jenis === "split_screen"
+                      ? "Layar Terbagi (Split-Screen)"
+                      : l.jenis === "copy_paste"
+                      ? "Percobaan Copy / Paste"
+                      : l.jenis === "buka_kunci"
+                      ? "Kunci Layar Dibuka Pengawas"
                       : "Reset Login oleh Admin"}
                   </span>
                   <span className="text-xs text-slate-500">

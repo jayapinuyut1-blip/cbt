@@ -95,6 +95,7 @@ create table if not exists public.exams (
   petunjuk text not null default '',
   tampil_hasil text not null default 'nilai' check (tampil_hasil in ('tidak', 'nilai', 'nilai_kunci')),
   bobot_tipe jsonb, -- NULL = hitung dari bobot soal; JSONB = persentase per tipe {"pg":70,"isian":0,"jodoh":0,"essay":30}
+  maks_pelanggaran int not null default 3 check (maks_pelanggaran >= 0), -- 0 = catat saja; >0 = kunci layar otomatis setelah N pelanggaran
   token text not null default upper(substr(md5(random()::text), 1, 6)),
   created_at timestamptz not null default now()
 );
@@ -141,6 +142,9 @@ create table if not exists public.attempts (
   nilai_sementara numeric(6,2),
   total_bobot numeric(8,2) not null default 0,
   extra_minutes int not null default 0,
+  pelanggaran_count int not null default 0,
+  is_locked boolean not null default false,
+  locked_reason text,
   question_order jsonb not null default '[]'::jsonb,
   last_active_at timestamptz not null default now(),
   unique (exam_id, student_id)
@@ -158,11 +162,11 @@ create table if not exists public.answers (
   unique (attempt_id, question_id)
 );
 
--- Log Aktivitas Ujian (Pindah Tab, Keluar Layar Penuh, Reset Login)
+-- Log Aktivitas Ujian (Pindah Tab, Keluar Layar Penuh, Split Screen, Copy Paste, Reset Login, Buka Kunci)
 create table if not exists public.attempt_logs (
   id bigint generated always as identity primary key,
   attempt_id bigint not null references public.attempts(id) on delete cascade,
-  jenis text not null check (jenis in ('pindah_tab', 'keluar_layar_penuh', 'reset_login')),
+  jenis text not null check (jenis in ('pindah_tab', 'keluar_layar_penuh', 'split_screen', 'copy_paste', 'reset_login', 'buka_kunci')),
   waktu timestamptz not null default now()
 );
 

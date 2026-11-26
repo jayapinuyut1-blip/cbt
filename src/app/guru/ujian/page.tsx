@@ -121,6 +121,7 @@ export default function GuruUjianPage() {
   const [tampilHasil, setTampilHasil] = useState<ExamResultVisibility>("nilai");
   const [aturanRemedial, setAturanRemedial] =
     useState<ExamRemedialRule>("maks_kkm");
+  const [maksPelanggaran, setMaksPelanggaran] = useState("3");
   const [petunjuk, setPetunjuk] = useState(
     "Berdoalah sebelum mengerjakan. Periksa kembali jawaban Anda sebelum mengumpulkan ujian."
   );
@@ -244,6 +245,7 @@ export default function GuruUjianPage() {
     setNavigasi("bebas");
     setTampilHasil("nilai");
     setAturanRemedial("maks_kkm");
+    setMaksPelanggaran("3");
     setPetunjuk(
       "Berdoalah sebelum mengerjakan. Periksa kembali jawaban Anda sebelum mengumpulkan ujian."
     );
@@ -283,6 +285,11 @@ export default function GuruUjianPage() {
     setNavigasi(ex.navigasi);
     setTampilHasil(ex.tampil_hasil);
     setAturanRemedial(ex.aturan_remedial || "maks_kkm");
+    setMaksPelanggaran(
+      ex.maks_pelanggaran !== undefined && ex.maks_pelanggaran !== null
+        ? String(ex.maks_pelanggaran)
+        : "3"
+    );
     setPetunjuk(ex.petunjuk || "");
     if (ex.bobot_tipe && typeof ex.bobot_tipe === "object") {
       setWeightMode("persen_tipe");
@@ -538,7 +545,11 @@ export default function GuruUjianPage() {
         tampil_hasil: tampilHasil,
         aturan_remedial: aturanRemedial,
       };
-      const payload = { ...basePayload, bobot_tipe: bobotTipeValue };
+      const payload = {
+        ...basePayload,
+        bobot_tipe: bobotTipeValue,
+        maks_pelanggaran: Math.max(0, Number(maksPelanggaran) || 0),
+      };
 
       let targetId = editingId;
       if (editingId) {
@@ -546,15 +557,25 @@ export default function GuruUjianPage() {
           .from("exams")
           .update(payload)
           .eq("id", editingId);
-        if (error && error.message?.includes("bobot_tipe")) {
-          if (weightMode === "persen_tipe") {
+        if (
+          error &&
+          (error.message?.includes("bobot_tipe") ||
+            error.message?.includes("maks_pelanggaran"))
+        ) {
+          if (weightMode === "persen_tipe" && error.message?.includes("bobot_tipe")) {
             throw new Error(
               "Kolom bobot_tipe belum tersedia di database. Jalankan file supabase/patch_exam_type_weights.sql di Supabase SQL Editor terlebih dahulu."
             );
           }
+          const retryPayload = {
+            ...basePayload,
+            ...(error.message?.includes("bobot_tipe")
+              ? {}
+              : { bobot_tipe: bobotTipeValue }),
+          };
           const retry = await supabase
             .from("exams")
-            .update(basePayload)
+            .update(retryPayload)
             .eq("id", editingId);
           error = retry.error;
         }
@@ -565,15 +586,25 @@ export default function GuruUjianPage() {
           .insert({ ...payload, token: generateExamToken() })
           .select("id")
           .single();
-        if (error && error.message?.includes("bobot_tipe")) {
-          if (weightMode === "persen_tipe") {
+        if (
+          error &&
+          (error.message?.includes("bobot_tipe") ||
+            error.message?.includes("maks_pelanggaran"))
+        ) {
+          if (weightMode === "persen_tipe" && error.message?.includes("bobot_tipe")) {
             throw new Error(
               "Kolom bobot_tipe belum tersedia di database. Jalankan file supabase/patch_exam_type_weights.sql di Supabase SQL Editor terlebih dahulu."
             );
           }
+          const retryPayload = {
+            ...basePayload,
+            ...(error.message?.includes("bobot_tipe")
+              ? {}
+              : { bobot_tipe: bobotTipeValue }),
+          };
           const retry = await supabase
             .from("exams")
-            .insert({ ...basePayload, token: generateExamToken() })
+            .insert({ ...retryPayload, token: generateExamToken() })
             .select("id")
             .single();
           data = retry.data;
@@ -728,6 +759,18 @@ export default function GuruUjianPage() {
                 >
                   Bobot:{" "}
                   {formatBobotTipeSummary(ex.bobot_tipe) || "Otomatis per soal"}
+                </span>
+                <span
+                  className={
+                    (ex.maks_pelanggaran ?? 3) > 0
+                      ? "text-rose-700 font-semibold"
+                      : "text-slate-500"
+                  }
+                >
+                  Anti-Curang:{" "}
+                  {(ex.maks_pelanggaran ?? 3) > 0
+                    ? `Kunci setelah ${ex.maks_pelanggaran ?? 3}x`
+                    : "Catat saja"}
                 </span>
               </div>
 
@@ -1132,6 +1175,33 @@ export default function GuruUjianPage() {
                     <option value="nilai_terbaik">Nilai Terbaik (MAX)</option>
                     <option value="nilai_terakhir">Nilai Remedial Terakhir</option>
                   </select>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Keamanan Anti-Curang (Pindah Tab / Minimize / Split-Screen)
+                  </label>
+                  <select
+                    value={maksPelanggaran}
+                    onChange={(e) => setMaksPelanggaran(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+                  >
+                    <option value="3">
+                      Mode Ketat — Kunci Layar setelah 3x pelanggaran (Direkomendasikan)
+                    </option>
+                    <option value="2">
+                      Sangat Ketat — Kunci Layar setelah 2x pelanggaran
+                    </option>
+                    <option value="5">
+                      Moderat — Kunci Layar setelah 5x pelanggaran
+                    </option>
+                    <option value="0">
+                      Catat Saja — Tidak mengunci layar (cocok untuk Latihan)
+                    </option>
+                  </select>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Jika layar siswa terkunci, siswa wajib melapor ke Pengawas agar dibuka kembali dari halaman Monitoring. Copy-paste & klik kanan tetap diblokir.
+                  </p>
                 </div>
               </div>
 

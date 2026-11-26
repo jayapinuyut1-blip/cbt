@@ -121,6 +121,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
+    if (action === "unlock_attempt" && attemptId) {
+      const { error: updErr } = await admin
+        .from("attempts")
+        .update({
+          is_locked: false,
+          locked_reason: null,
+          pelanggaran_count: 0,
+          last_active_at: new Date().toISOString(),
+        })
+        .eq("id", attemptId);
+      if (updErr) {
+        return NextResponse.json({ error: updErr.message }, { status: 400 });
+      }
+      await admin.from("attempt_logs").insert({
+        attempt_id: attemptId,
+        jenis: "buka_kunci",
+      });
+      return NextResponse.json({ ok: true });
+    }
+
     if (action === "toggle_block" && studentId) {
       const is_blocked = Boolean(body.is_blocked);
       await admin

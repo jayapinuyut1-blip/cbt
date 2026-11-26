@@ -29,6 +29,9 @@ import {
   Loader2,
   LayoutGrid,
   X,
+  Lock,
+  ShieldAlert,
+  RefreshCw,
 } from "lucide-react";
 
 function getClientSessionCookie(): string | null {
@@ -81,6 +84,28 @@ export default function ExamWorkspace({
   const [showMobileNav, setShowMobileNav] = useState(false);
   const [conflictError, setConflictError] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // State Anti-Curang Mode Ketat (Opsi A: Peringatan Bertingkat + Kunci Layar Server-Side)
+  const maxViolations =
+    session.maks_pelanggaran ?? session.exam.maks_pelanggaran ?? 3;
+  const [violationCount, setViolationCount] = useState<number>(
+    session.pelanggaran_count ?? 0
+  );
+  const [isLocked, setIsLocked] = useState<boolean>(Boolean(session.is_locked));
+  const [lockedReason, setLockedReason] = useState<string>(
+    session.locked_reason || ""
+  );
+  const [warningNotice, setWarningNotice] = useState<{
+    count: number;
+    max: number;
+    reason: string;
+  } | null>(null);
+  const [securityToast, setSecurityToast] = useState("");
+  const [checkingUnlock, setCheckingUnlock] = useState(false);
+
+  const lastViolationTsRef = useRef<number>(0);
+  const lastCopyLogTsRef = useRef<number>(0);
+  const baselineViewportRef = useRef<{ w: number; h: number } | null>(null);
 
   // Sinkronisasi waktu berbasis server (bukan jam lokal perangkat siswa)
   const serverOffsetRef = useRef<number>(
@@ -152,7 +177,12 @@ export default function ExamWorkspace({
       if (error) {
         setSaveStatus("error");
         const msg = error.message || "";
-        if (
+        if (msg.includes("ATTEMPT_LOCKED")) {
+          setIsLocked(true);
+          setLockedReason(
+            "Layar ujian Anda sedang terkunci karena melampaui batas pelanggaran."
+          );
+        } else if (
           msg.includes("SESSION_CONFLICT") ||
           msg.includes("BLOCKED") ||
           msg.includes("ATTEMPT_CLOSED")
@@ -277,39 +307,226 @@ export default function ExamWorkspace({
     return () => clearInterval(timer);
   }, [mode, handleSubmitExam]);
 
-  // Pencatat Aktivitas (Hanya Mencatat, Tidak Memblokir — Sesuai PRD Bagian 6)
+  // Fungsi catat pelanggaran ke server + tampilkan peringatan / kunci layar (Mode Ketat Opsi A)
+  const recordViolation = useCallback(
+    async (
+      jenis: "pindah_tab" | "keluar_layar_penuh" | "split_screen",
+      humanReason: string
+    ) => {
+      if (mode !== "live" || isLocked || submitting || autoSubmittedRef.current) {
+        return;
+      }
+      // Cooldown 2.5 detik agar 1 perpindahan tab tidak terhitung ganda oleh blur + visibilitychange
+      const now = Date.now();
+      if (now - lastViolationTsRef.current < 2500) return;
+      lastViolationTsRef.current = now;
+
+      const { data } = await supabase.rpc("log_attempt_event", {
+        p_attempt_id: session.attempt_id,
+        p_jenis: jenis,
+        p_session_id: getClientSessionCookie(),
+      });
+
+      const res = data as
+        | {
+            ok?: boolean;
+            pelanggaran_count?: number;
+            maks_pelanggaran?: number;
+            is_locked?: boolean;
+            locked_reason?: string | null;
+          }
+        | null;
+
+      const nextCount =
+        typeof res?.pelanggaran_count === "number"
+          ? res.pelanggaran_count
+          : violationCount + 1;
+      const limit =
+        typeof res?.maks_pelanggaran === "number"
+          ? res.maks_pelanggaran
+          : maxViolations;
+      const locked = Boolean(
+        res?.is_locked || (limit > 0 && nextCount >= limit)
+      );
+
+      setViolationCount(nextCount);
+      if (locked) {
+        setIsLocked(true);
+        setLockedReason(
+          res?.locked_reason ||
+            `Melebihi batas pelanggaran (${nextCount}/${limit}): ${humanReason}`
+        );
+        setWarningNotice(null);
+      } else if (limit > 0) {
+        setWarningNotice({
+          count: nextCount,
+          max: limit,
+          reason: humanReason,
+        });
+      }
+    },
+    [mode, isLocked, submitting, supabase, session.attempt_id, violationCount, maxViolations]
+  );
+
+  // Deteksi Anti-Curang: Pindah Tab, Minimize/Blur, Keluar Layar Penuh, & Split-Screen
   useEffect(() => {
     if (mode !== "live") return;
 
+    baselineViewportRef.current = {
+      w: window.innerWidth,
+      h: window.innerHeight,
+    };
+
     function handleVisibility() {
       if (document.hidden) {
-        supabase.rpc("log_attempt_event", {
-          p_attempt_id: session.attempt_id,
-          p_jenis: "pindah_tab",
-          p_session_id: getClientSessionCookie(),
-        });
+        recordViolation("pindah_tab", "Berpindah tab atau keluar dari browser");
       }
+    }
+
+    function handleWindowBlur() {
+      // Tunda sedikit agar klik elemen form/select internal tidak false positive
+      setTimeout(() => {
+        if (!document.hasFocus() && !document.hidden) {
+          recordViolation(
+            "pindah_tab",
+            "Berpindah ke aplikasi / jendela lain (kehilangan fokus)"
+          );
+        }
+      }, 250);
     }
 
     function handleFullscreenChange() {
       const inFs = Boolean(document.fullscreenElement);
       setIsFullscreen(inFs);
       if (!inFs) {
+        recordViolation("keluar_layar_penuh", "Keluar dari mode layar penuh");
+      }
+    }
+
+    function handleResize() {
+      const base = baselineViewportRef.current;
+      if (!base) return;
+      // Abaikan jika keyboard HP muncul saat siswa mengetik di input/textarea
+      const activeTag = document.activeElement?.tagName?.toLowerCase();
+      const isTyping = activeTag === "input" || activeTag === "textarea";
+      const wRatio = window.innerWidth / Math.max(1, base.w);
+      const hRatio = window.innerHeight / Math.max(1, base.h);
+      if (wRatio < 0.65 || (!isTyping && hRatio < 0.62)) {
+        recordViolation(
+          "split_screen",
+          "Layar mengecil drastis / mode layar terbagi (split-screen)"
+        );
+      } else if (window.innerWidth > base.w && window.innerHeight > base.h) {
+        baselineViewportRef.current = {
+          w: window.innerWidth,
+          h: window.innerHeight,
+        };
+      }
+    }
+
+    // Blokir Copy, Cut, Paste, Klik Kanan, dan Pintasan Keyboard (Ctrl+C/V/U, F12)
+    function notifyBlockedCopy(msg: string) {
+      setSecurityToast(msg);
+      setTimeout(() => setSecurityToast(""), 2500);
+      const now = Date.now();
+      if (now - lastCopyLogTsRef.current > 10000) {
+        lastCopyLogTsRef.current = now;
         supabase.rpc("log_attempt_event", {
           p_attempt_id: session.attempt_id,
-          p_jenis: "keluar_layar_penuh",
+          p_jenis: "copy_paste",
           p_session_id: getClientSessionCookie(),
         });
       }
     }
 
+    function handleContextMenu(e: MouseEvent) {
+      e.preventDefault();
+      notifyBlockedCopy("Klik kanan dinonaktifkan selama ujian.");
+    }
+
+    function handleClipboard(e: ClipboardEvent) {
+      e.preventDefault();
+      notifyBlockedCopy("Salin / tempel (Copy-Paste) diblokir selama ujian.");
+    }
+
+    function handleKeyDown(e: KeyboardEvent) {
+      const key = e.key.toLowerCase();
+      if (
+        e.key === "F12" ||
+        ((e.ctrlKey || e.metaKey) &&
+          (key === "c" || key === "v" || key === "x" || key === "u" || key === "s" || key === "p")) ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && (key === "i" || key === "j" || key === "c"))
+      ) {
+        e.preventDefault();
+        notifyBlockedCopy("Pintasan keyboard ini dinonaktifkan selama ujian.");
+      }
+    }
+
     document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("blur", handleWindowBlur);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
+    window.addEventListener("resize", handleResize);
+    document.addEventListener("contextmenu", handleContextMenu);
+    document.addEventListener("copy", handleClipboard);
+    document.addEventListener("cut", handleClipboard);
+    document.addEventListener("paste", handleClipboard);
+    window.addEventListener("keydown", handleKeyDown);
+
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("blur", handleWindowBlur);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      window.removeEventListener("resize", handleResize);
+      document.removeEventListener("contextmenu", handleContextMenu);
+      document.removeEventListener("copy", handleClipboard);
+      document.removeEventListener("cut", handleClipboard);
+      document.removeEventListener("paste", handleClipboard);
+      window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [mode, supabase, session.attempt_id]);
+  }, [mode, recordViolation, supabase, session.attempt_id]);
+
+  // Cek otomatis apakah Pengawas/Admin sudah mengklik "Buka Kunci" di Monitoring
+  const checkUnlockStatus = useCallback(async () => {
+    if (mode !== "live") return;
+    setCheckingUnlock(true);
+    try {
+      const { data, error } = await supabase.rpc("start_or_resume_exam", {
+        p_exam_id: session.exam.id,
+        p_token: null,
+        p_session_id: getClientSessionCookie(),
+      });
+      if (error) {
+        const msg = error.message || "";
+        if (msg.includes("TIME_EXPIRED")) {
+          router.push(`/siswa/hasil/${session.attempt_id}`);
+        } else if (msg.includes("SESSION_CONFLICT") || msg.includes("BLOCKED")) {
+          setConflictError(msg);
+        }
+        return;
+      }
+      const resumed = data as ExamSessionPayload | null;
+      if (resumed && !resumed.is_locked) {
+        setIsLocked(false);
+        setLockedReason("");
+        setViolationCount(resumed.pelanggaran_count ?? 0);
+        if (resumed.deadline && resumed.server_now) {
+          serverOffsetRef.current =
+            new Date(resumed.server_now).getTime() - Date.now();
+          deadlineMsRef.current = new Date(resumed.deadline).getTime();
+        }
+      }
+    } finally {
+      setCheckingUnlock(false);
+    }
+  }, [mode, supabase, session.exam.id, session.attempt_id, router]);
+
+  useEffect(() => {
+    if (mode !== "live" || !isLocked) return;
+    const interval = setInterval(() => {
+      checkUnlockStatus();
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [mode, isLocked, checkUnlockStatus]);
 
   function requestFullscreen() {
     document.documentElement.requestFullscreen?.().catch(() => {});
@@ -438,6 +655,16 @@ export default function ExamWorkspace({
                     <span>Tersimpan</span>
                   </>
                 )}
+              </div>
+            )}
+
+            {/* Indikator Pelanggaran (Mode Ketat Opsi A) */}
+            {mode === "live" && maxViolations > 0 && violationCount > 0 && (
+              <div className="text-[11px] sm:text-xs flex items-center gap-1 px-2 py-1 rounded-full bg-rose-100 text-rose-700 font-bold border border-rose-200">
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>
+                  {violationCount}/{maxViolations}
+                </span>
               </div>
             )}
 
@@ -574,8 +801,8 @@ export default function ExamWorkspace({
             </button>
           </div>
 
-          {/* Teks & Gambar Soal */}
-          <div className={`${textSizeClass} leading-relaxed whitespace-pre-wrap`}>
+          {/* Teks & Gambar Soal (Anti-seleksi teks) */}
+          <div className={`${textSizeClass} leading-relaxed whitespace-pre-wrap select-none`}>
             {question.teks}
           </div>
 
@@ -625,7 +852,7 @@ export default function ExamWorkspace({
                       >
                         {letter}
                       </span>
-                      <span className={`${textSizeClass} pt-0.5`}>{opt.teks}</span>
+                      <span className={`${textSizeClass} pt-0.5 select-none`}>{opt.teks}</span>
                     </button>
 
                     {/* Tombol Coret Opsi (Bluebook-style) */}
@@ -1045,6 +1272,123 @@ export default function ExamWorkspace({
                 {submitting ? "Mengumpulkan..." : "Ya, Kumpulkan"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Watermark Transparan Identitas Siswa (Anti Foto / Sebar Soal) */}
+      {mode === "live" && session.student_watermark && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-0 z-10 overflow-hidden select-none opacity-[0.045] flex flex-wrap items-center justify-around gap-16 -rotate-12 scale-110"
+        >
+          {Array.from({ length: 12 }).map((_, i) => (
+            <span
+              key={i}
+              className="text-sm sm:text-base font-extrabold tracking-widest uppercase text-slate-900 whitespace-nowrap"
+            >
+              {session.student_watermark}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Toast Singkat Blokir Copy/Paste/Klik Kanan */}
+      {securityToast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold shadow-lg flex items-center gap-2">
+          <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>{securityToast}</span>
+        </div>
+      )}
+
+      {/* Modal Peringatan Bertingkat (Pelanggaran 1 .. N-1) */}
+      {warningNotice && !isLocked && (
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white text-slate-900 rounded-2xl max-w-md w-full p-6 space-y-4 border-2 border-amber-400 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-900">
+                  Peringatan Keamanan Ujian ({warningNotice.count}/{warningNotice.max})
+                </h3>
+                <p className="text-xs text-amber-800 font-medium">
+                  Aktivitas mencurigakan tercatat ke Pengawas
+                </p>
+              </div>
+            </div>
+            <div className="text-sm text-slate-700 space-y-2">
+              <p>
+                Sistem mendeteksi: <strong>{warningNotice.reason}</strong>.
+              </p>
+              <p className="text-xs bg-rose-50 border border-rose-200 text-rose-800 rounded-lg p-3">
+                Jika mencapai <strong>{warningNotice.max}x pelanggaran</strong>, layar ujian Anda akan <strong>TERKUNCI OTOMATIS</strong> dan hanya dapat dibuka kembali oleh Pengawas Ujian.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setWarningNotice(null);
+                requestFullscreen();
+              }}
+              className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-sm cursor-pointer"
+            >
+              Saya Mengerti, Kembali ke Ujian
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Layar Kunci Permanen (Mode Ketat Opsi A — Wajib Dibuka Pengawas dari Monitoring) */}
+      {isLocked && (
+        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="bg-white text-slate-900 rounded-2xl max-w-md w-full p-6 sm:p-7 space-y-4 text-center shadow-2xl border-2 border-rose-500">
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center">
+              <Lock className="w-8 h-8" />
+            </div>
+            <div>
+              <span className="inline-block px-3 py-0.5 rounded-full bg-rose-600 text-white text-xs font-bold uppercase tracking-wider">
+                Layar Ujian Terkunci
+              </span>
+              <h3 className="font-extrabold text-xl text-slate-900 mt-2">
+                Batas Pelanggaran Tercapai
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                {lockedReason ||
+                  `Anda telah mencapai ${violationCount}/${maxViolations} pelanggaran.`}
+              </p>
+            </div>
+
+            {session.student_watermark && (
+              <div className="px-3 py-2 rounded-xl bg-slate-100 text-xs font-semibold text-slate-700">
+                Peserta: {session.student_watermark}
+              </div>
+            )}
+
+            <div className="text-xs text-left bg-rose-50 border border-rose-200 text-rose-900 rounded-xl p-3.5 space-y-1.5">
+              <p className="font-semibold">Cara membuka kunci ujian:</p>
+              <ol className="list-decimal pl-4 space-y-1">
+                <li>Tetap di halaman ini (jawaban sebelumnya sudah tersimpan aman).</li>
+                <li>Angkat tangan dan lapor kepada Pengawas di ruang ujian.</li>
+                <li>Pengawas akan mengklik <strong>Buka Kunci</strong> pada halaman Monitoring.</li>
+                <li>Halaman ini akan terbuka otomatis begitu Pengawas menyetujui.</li>
+              </ol>
+            </div>
+
+            <button
+              type="button"
+              disabled={checkingUnlock}
+              onClick={checkUnlockStatus}
+              className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white font-semibold text-sm inline-flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <RefreshCw
+                className={`w-4 h-4 ${checkingUnlock ? "animate-spin" : ""}`}
+              />
+              {checkingUnlock
+                ? "Memeriksa izin pengawas..."
+                : "Cek Status Buka Kunci"}
+            </button>
           </div>
         </div>
       )}

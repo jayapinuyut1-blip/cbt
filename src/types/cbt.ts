@@ -5,7 +5,13 @@ export type ExamNavigation = "bebas" | "berurutan";
 export type ExamResultVisibility = "tidak" | "nilai" | "nilai_kunci";
 export type ExamRemedialRule = "maks_kkm" | "nilai_terbaik" | "nilai_terakhir";
 export type AttemptStatus = "mengerjakan" | "menunggu_koreksi" | "selesai";
-export type LogEventType = "pindah_tab" | "keluar_layar_penuh" | "reset_login";
+export type LogEventType =
+  | "pindah_tab"
+  | "keluar_layar_penuh"
+  | "split_screen"
+  | "copy_paste"
+  | "reset_login"
+  | "buka_kunci";
 
 export interface AcademicYear {
   id: number;
@@ -87,6 +93,7 @@ export interface Exam {
   tampil_hasil: ExamResultVisibility;
   aturan_remedial?: ExamRemedialRule;
   bobot_tipe?: ExamTypeWeights | null;
+  maks_pelanggaran?: number;
   token: string;
   created_at: string;
   subjects?: { id: number; nama: string } | null;
@@ -173,6 +180,13 @@ export interface SavedAnswerState {
 
 export interface ExamSessionPayload {
   attempt_id: number;
+  attempt_ke?: number;
+  is_remedial?: boolean;
+  is_locked?: boolean;
+  locked_reason?: string | null;
+  pelanggaran_count?: number;
+  maks_pelanggaran?: number;
+  student_watermark?: string;
   exam: {
     id: number;
     judul: string;
@@ -181,6 +195,7 @@ export interface ExamSessionPayload {
     jenis: ExamKind;
     navigasi: ExamNavigation;
     petunjuk: string;
+    maks_pelanggaran?: number;
   };
   server_now: string;
   deadline: string;
