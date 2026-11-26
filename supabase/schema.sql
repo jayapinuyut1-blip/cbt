@@ -188,7 +188,8 @@ values ('2026/2027', true)
 on conflict (nama) do nothing;
 
 insert into public.subjects (nama) values
-  ('Pendidikan Agama'),
+  ('Pendidikan Agama Islam'),
+  ('Pendidikan Agama Kristen'),
   ('Sejarah'),
   ('Matematika'),
   ('PKn'),
