@@ -1013,14 +1013,14 @@ export default function GuruBankSoalPage() {
       {/* Modal Mode AI Generator Soal */}
       {showAiModal && selectedSubjectId && (
         <AiQuestionModal
-          subjectId={Number(selectedSubjectId)}
-          subjectName={
-            subjects.find((s) => String(s.id) === selectedSubjectId)?.nama ||
-            "Mata Pelajaran"
-          }
+          initialSubjectId={Number(selectedSubjectId)}
+          allowedSubjects={subjects}
           userId={userId}
           onClose={() => setShowAiModal(false)}
-          onSaved={() => loadQuestions()}
+          onSaved={(savedSubjId) => {
+            setSelectedSubjectId(String(savedSubjId));
+            loadQuestions();
+          }}
         />
       )}
     </div>

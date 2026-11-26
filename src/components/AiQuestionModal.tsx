@@ -1,9 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import { questionTypeLabel } from "@/lib/format";
+import {
+  GRADE_LABELS,
+  getCapaianForSubject,
+  type GradeOption,
+} from "@/lib/capaian-pembelajaran";
+import type { Subject } from "@/types/cbt";
 import type { GeneratedQuestion } from "@/app/api/guru/generate-questions/route";
 import {
   Sparkles,
@@ -15,6 +21,7 @@ import {
   Trash2,
   Loader2,
   ClipboardPaste,
+  BookOpenCheck,
 } from "lucide-react";
 
 export function buildExcelWorkbookFromGenerated(
@@ -102,22 +109,24 @@ export function buildExcelWorkbookFromGenerated(
 }
 
 export default function AiQuestionModal({
-  subjectId,
-  subjectName,
+  initialSubjectId,
+  allowedSubjects,
   userId,
   onClose,
   onSaved,
 }: {
-  subjectId: number;
-  subjectName: string;
+  initialSubjectId: number;
+  allowedSubjects: Subject[];
   userId: string | null;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (savedSubjectId: number) => void;
 }) {
   const supabase = createClient();
   const [mode, setMode] = useState<"auto" | "prompt">("auto");
+  const [activeSubjectId, setActiveSubjectId] = useState<number>(initialSubjectId);
+  const [grade, setGrade] = useState<GradeOption>("X");
+  const [selectedCpIds, setSelectedCpIds] = useState<string[]>([]);
   const [topic, setTopic] = useState("");
-  const [gradeLevel, setGradeLevel] = useState("Kelas X SMK");
   const [difficulty, setDifficulty] = useState("Sedang (Campuran C2-C4)");
   const [countPg, setCountPg] = useState(5);
   const [countIsian, setCountIsian] = useState(2);
@@ -130,14 +139,53 @@ export default function AiQuestionModal({
   const [results, setResults] = useState<GeneratedQuestion[]>([]);
   const [saving, setSaving] = useState(false);
 
-  // Mode Prompt Gratis (copy-paste JSON)
   const [copied, setCopied] = useState(false);
   const [pastedJson, setPastedJson] = useState("");
 
+  const activeSubjectName =
+    allowedSubjects.find((s) => s.id === activeSubjectId)?.nama ||
+    "Mata Pelajaran";
+
+  const availableCps = useMemo(
+    () => getCapaianForSubject(activeSubjectName, grade),
+    [activeSubjectName, grade]
+  );
+
+  // Reset pilihan CP saat ganti mapel atau kelas, otomatis centang CP pertama agar praktis
+  useEffect(() => {
+    if (availableCps.length > 0) {
+      setSelectedCpIds([availableCps[0].id]);
+    } else {
+      setSelectedCpIds([]);
+    }
+  }, [availableCps]);
+
+  const selectedCps = useMemo(
+    () => availableCps.filter((cp) => selectedCpIds.includes(cp.id)),
+    [availableCps, selectedCpIds]
+  );
+
+  function toggleCp(id: string) {
+    setSelectedCpIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
   function buildCopyablePrompt() {
-    return `Buatkan soal ujian CBT dalam Bahasa Indonesia untuk mata pelajaran "${subjectName}", jenjang ${gradeLevel}, tingkat kesulitan ${difficulty}.
-Materi / Topik:
-${topic || "(Tulis topik atau tempel ringkasan materi Anda di sini)"}
+    const cpLines =
+      selectedCps.length > 0
+        ? selectedCps
+            .map((cp, i) => `${i + 1}. [${cp.elemen}] ${cp.deskripsi}`)
+            .join("\n")
+        : "(Sesuai topik di bawah)";
+
+    return `Buatkan soal ujian CBT dalam Bahasa Indonesia sesuai Kurikulum Merdeka SMK:
+- Mata Pelajaran: ${activeSubjectName}
+- Jenjang / Kelas: ${GRADE_LABELS[grade].label}
+- Tingkat Kesulitan: ${difficulty}
+- Capaian Pembelajaran (CP):
+${cpLines}
+${topic.trim() ? `- Topik / Catatan Khusus: ${topic.trim()}` : ""}
 
 Jumlah soal:
 - Pilihan Ganda (pg): ${countPg} soal (5 opsi A-E, 1 benar, bobot 1)
@@ -184,16 +232,25 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
   async function handleAutoGenerate(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (selectedCps.length === 0 && !topic.trim()) {
+      setError("Pilih minimal 1 Capaian Pembelajaran atau tulis topik materi.");
+      return;
+    }
+
     setGenerating(true);
     try {
       const res = await fetch("/api/guru/generate-questions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          subjectId,
-          subjectName,
+          subjectId: activeSubjectId,
+          subjectName: activeSubjectName,
+          gradeLevel: GRADE_LABELS[grade].label,
+          selectedCps: selectedCps.map((c) => ({
+            elemen: c.elemen,
+            deskripsi: c.deskripsi,
+          })),
           topic,
-          gradeLevel,
           difficulty,
           countPg,
           countIsian,
@@ -225,7 +282,7 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
         const { data: qRow, error: qErr } = await supabase
           .from("questions")
           .insert({
-            subject_id: subjectId,
+            subject_id: activeSubjectId,
             guru_id: userId,
             tipe: q.tipe,
             teks: q.teks.trim(),
@@ -283,7 +340,7 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
       }
 
       alert(`Berhasil menyimpan ${savedCount} soal hasil AI ke Bank Soal!`);
-      onSaved();
+      onSaved(activeSubjectId);
       onClose();
     } catch {
       setError("Gagal menyimpan ke database.");
@@ -295,8 +352,8 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
   function exportGeneratedToExcel() {
     if (results.length === 0) return;
     const wb = buildExcelWorkbookFromGenerated(results, "Soal AI");
-    const safeName = subjectName.replace(/[^a-zA-Z0-9_-]/g, "_");
-    XLSX.writeFile(wb, `soal-ai-${safeName}.xlsx`);
+    const safeName = activeSubjectName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    XLSX.writeFile(wb, `soal-ai-${safeName}-kelas-${grade}.xlsx`);
   }
 
   return (
@@ -309,10 +366,10 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
             </div>
             <div>
               <h2 className="font-bold text-lg text-slate-900">
-                Mode AI Generator Soal
+                Mode AI Generator Soal (Kurikulum Merdeka SMK)
               </h2>
               <p className="text-xs text-slate-500">
-                Mapel: <strong>{subjectName}</strong> — Hasil dapat ditinjau, diunduh ke Excel, atau langsung disimpan ke Bank Soal.
+                Pilih mapel yang Anda ampu, kelas, dan Capaian Pembelajaran (CP) resmi BSKAP.
               </p>
             </div>
           </div>
@@ -350,20 +407,36 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           </button>
         </div>
 
-        {/* Pengaturan Soal Bersama */}
-        <div className="grid sm:grid-cols-2 gap-3">
+        {/* Mapel yang Diampu, Kelas & Tingkat Kesulitan */}
+        <div className="grid sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">
-              Kelas / Jenjang
+              Mata Pelajaran Diampu
             </label>
             <select
-              value={gradeLevel}
-              onChange={(e) => setGradeLevel(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+              value={activeSubjectId}
+              onChange={(e) => setActiveSubjectId(Number(e.target.value))}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
             >
-              <option value="Kelas X SMK">Kelas X SMK</option>
-              <option value="Kelas XI SMK">Kelas XI SMK</option>
-              <option value="Kelas XII SMK">Kelas XII SMK</option>
+              {allowedSubjects.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nama}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">
+              Kelas & Fase
+            </label>
+            <select
+              value={grade}
+              onChange={(e) => setGrade(e.target.value as GradeOption)}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+            >
+              <option value="X">Kelas X SMK (Fase E)</option>
+              <option value="XI">Kelas XI SMK (Fase F)</option>
+              <option value="XII">Kelas XII SMK (Fase F)</option>
             </select>
           </div>
           <div>
@@ -373,7 +446,7 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
             <select
               value={difficulty}
               onChange={(e) => setDifficulty(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
             >
               <option value="Mudah (C1-C2)">Mudah (Pemahaman Dasar)</option>
               <option value="Sedang (Campuran C2-C4)">Sedang (Campuran)</option>
@@ -382,6 +455,69 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           </div>
         </div>
 
+        {/* Pilihan Capaian Pembelajaran (CP) Dinamis */}
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+              <BookOpenCheck className="w-4 h-4 text-purple-600" />
+              Capaian Pembelajaran (CP) — {activeSubjectName} ({GRADE_LABELS[grade].label})
+            </label>
+            {availableCps.length > 0 && (
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedCpIds(
+                    selectedCpIds.length === availableCps.length
+                      ? []
+                      : availableCps.map((c) => c.id)
+                  )
+                }
+                className="text-xs text-purple-700 hover:underline font-medium cursor-pointer"
+              >
+                {selectedCpIds.length === availableCps.length
+                  ? "Batal Pilih Semua"
+                  : `Pilih Semua (${availableCps.length} CP)`}
+              </button>
+            )}
+          </div>
+
+          {availableCps.length > 0 ? (
+            <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+              {availableCps.map((cp) => {
+                const checked = selectedCpIds.includes(cp.id);
+                return (
+                  <label
+                    key={cp.id}
+                    className={`flex items-start gap-2.5 p-3 cursor-pointer transition ${
+                      checked ? "bg-purple-50/70" : "hover:bg-slate-50"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={checked}
+                      onChange={() => toggleCp(cp.id)}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-slate-900">
+                        {cp.elemen}
+                      </div>
+                      <div className="text-xs text-slate-600 leading-relaxed mt-0.5">
+                        {cp.deskripsi}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
+              Katalog CP bawaan untuk mapel ini belum tersedia. Silakan tulis topik atau tempel teks materi di kolom bawah.
+            </div>
+          )}
+        </div>
+
+        {/* Jumlah Soal per Tipe */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">
@@ -437,15 +573,19 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           </div>
         </div>
 
+        {/* Topik Tambahan / Catatan Khusus (Opsional bila CP sudah dipilih) */}
         <div>
           <label className="block text-xs font-medium text-slate-700 mb-1">
-            Topik, Kisi-kisi, atau Tempel Teks Ringkasan Materi
+            Fokus Topik / Materi Tambahan{" "}
+            <span className="text-slate-400 font-normal">
+              ({selectedCps.length > 0 ? "Opsional — CP sudah dipilih di atas" : "Wajib jika tidak memilih CP"})
+            </span>
           </label>
           <textarea
-            rows={4}
+            rows={3}
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
-            placeholder="Contoh: Pengolahan tanah, jenis pupuk organik & anorganik, pembiakan vegetatif (cangkok, okulasi, stek), dan pengendalian hama padi."
+            placeholder="Contoh: Fokus pada studi kasus praktik bengkel/lapangan, atau tempel ringkasan materi Anda di sini..."
             className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
           />
         </div>
@@ -454,20 +594,20 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           <form onSubmit={handleAutoGenerate} className="space-y-3">
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">
-                Gemini API Key (Opsional — kosongkan jika sudah diatur di server <code>.env.local</code> / Vercel)
+                Gemini API Key (Opsional — sudah otomatis menggunakan key server)
               </label>
               <input
                 type="password"
                 value={customApiKey}
                 onChange={(e) => setCustomApiKey(e.target.value)}
-                placeholder="AIzaSy... (opsional)"
+                placeholder="Biarkan kosong untuk memakai key bawaan server"
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"
               />
             </div>
 
             <button
               type="submit"
-              disabled={generating || !topic.trim()}
+              disabled={generating || (selectedCps.length === 0 && !topic.trim())}
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300 text-white rounded-xl text-sm font-semibold cursor-pointer"
             >
               {generating ? (
@@ -485,12 +625,12 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
             <div className="flex items-center justify-between gap-2">
               <div className="text-xs text-slate-600">
-                <strong>Langkah 1:</strong> Salin prompt ini lalu tempel ke ChatGPT / Gemini Web.
+                <strong>Langkah 1:</strong> Salin prompt (sudah otomatis berisi Mapel, Kelas & CP pilihan Anda) lalu tempel ke ChatGPT / Gemini Web.
               </div>
               <button
                 type="button"
                 onClick={copyPrompt}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold cursor-pointer shrink-0"
               >
                 {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                 {copied ? "Prompt Tersalin!" : "Salin Prompt AI"}
@@ -530,7 +670,7 @@ PENTING: Keluarkan HANYA JSON array valid (tanpa teks pembuka/penutup) persis me
           <div className="border-t border-slate-200 pt-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="font-bold text-sm text-slate-900">
-                Pratinjau Hasil ({results.length} Soal)
+                Pratinjau Hasil ({results.length} Soal — {activeSubjectName} Kelas {grade})
               </div>
               <div className="flex flex-wrap gap-2">
                 <button

@@ -32,7 +32,12 @@ export async function POST(request: Request) {
     const subjectId = Number(body.subjectId);
     const subjectName = String(body.subjectName || "").trim();
     const topic = String(body.topic || "").trim();
-    const gradeLevel = String(body.gradeLevel || "Kelas X SMK").trim();
+    const selectedCps: Array<{ elemen: string; deskripsi: string }> = Array.isArray(
+      body.selectedCps
+    )
+      ? body.selectedCps
+      : [];
+    const gradeLevel = String(body.gradeLevel || "Kelas X SMK (Fase E)").trim();
     const difficulty = String(body.difficulty || "Sedang").trim();
     const countPg = Math.max(0, Math.min(30, Number(body.countPg || 0)));
     const countIsian = Math.max(0, Math.min(15, Number(body.countIsian || 0)));
@@ -40,9 +45,12 @@ export async function POST(request: Request) {
     const countEssay = Math.max(0, Math.min(10, Number(body.countEssay || 0)));
     const customApiKey = String(body.apiKey || "").trim();
 
-    if (!topic) {
+    if (!topic && selectedCps.length === 0) {
       return NextResponse.json(
-        { error: "Topik atau teks materi wajib diisi." },
+        {
+          error:
+            "Pilih minimal satu Capaian Pembelajaran (CP) atau isi topik/materi acuan.",
+        },
         { status: 400 }
       );
     }
@@ -89,17 +97,23 @@ export async function POST(request: Request) {
       );
     }
 
-    const prompt = `Anda adalah guru SMK profesional di Indonesia pembuat soal ujian CBT berkualitas tinggi.
-Buatkan soal ujian dalam Bahasa Indonesia yang jelas, baku, tidak ambigu, dan sesuai kurikulum SMK.
+    const cpBlock =
+      selectedCps.length > 0
+        ? selectedCps
+            .map((cp, idx) => `${idx + 1}. [${cp.elemen}] ${cp.deskripsi}`)
+            .join("\n")
+        : "(Mengikuti topik/materi acuan di bawah)";
+
+    const prompt = `Anda adalah guru SMK profesional di Indonesia pembuat soal ujian CBT berkualitas tinggi sesuai Kurikulum Merdeka (BSKAP).
+Buatkan soal ujian dalam Bahasa Indonesia yang jelas, baku, tidak ambigu, dan kontekstual untuk siswa SMK.
 
 Detail Permintaan:
 - Mata Pelajaran: ${subjectName || "Umum SMK"}
-- Jenjang / Kelas: ${gradeLevel}
+- Jenjang / Kelas & Fase: ${gradeLevel}
 - Tingkat Kesulitan: ${difficulty}
-- Topik / Materi Acuan:
-"""
-${topic}
-"""
+- Capaian Pembelajaran (CP) yang Diujikan:
+${cpBlock}
+${topic ? `- Fokus Topik / Materi Tambahan dari Guru:\n"""\n${topic}\n"""` : ""}
 
 Jumlah soal yang WAJIB dibuat:
 - Pilihan Ganda (tipe "pg"): ${countPg} soal (masing-masing 5 opsi A-E, tepat 1 opsi benar, bobot 1)
