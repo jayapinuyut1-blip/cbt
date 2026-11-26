@@ -63,6 +63,13 @@ export interface Question {
   subjects?: { id: number; nama: string } | null;
 }
 
+export interface ExamTypeWeights {
+  pg?: number;
+  isian?: number;
+  jodoh?: number;
+  essay?: number;
+}
+
 export interface Exam {
   id: number;
   judul: string;
@@ -79,6 +86,7 @@ export interface Exam {
   petunjuk: string;
   tampil_hasil: ExamResultVisibility;
   aturan_remedial?: ExamRemedialRule;
+  bobot_tipe?: ExamTypeWeights | null;
   token: string;
   created_at: string;
   subjects?: { id: number; nama: string } | null;

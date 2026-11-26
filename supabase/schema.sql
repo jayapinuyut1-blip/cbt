@@ -94,6 +94,7 @@ create table if not exists public.exams (
   navigasi text not null default 'bebas' check (navigasi in ('bebas', 'berurutan')),
   petunjuk text not null default '',
   tampil_hasil text not null default 'nilai' check (tampil_hasil in ('tidak', 'nilai', 'nilai_kunci')),
+  bobot_tipe jsonb, -- NULL = hitung dari bobot soal; JSONB = persentase per tipe {"pg":70,"isian":0,"jodoh":0,"essay":30}
   token text not null default upper(substr(md5(random()::text), 1, 6)),
   created_at timestamptz not null default now()
 );
@@ -436,12 +437,30 @@ set search_path = public
 as $$
 declare
   v_attempt public.attempts%rowtype;
+  v_exam public.exams%rowtype;
+  v_jwt_role text;
+  v_internal text;
   v_item jsonb;
   v_q public.questions%rowtype;
   v_ans public.answers%rowtype;
   v_total_bobot numeric(10,2) := 0;
   v_total_skor numeric(10,2) := 0;
   v_obj_skor numeric(10,2) := 0;
+  v_bobot_pg numeric(10,2) := 0;
+  v_skor_pg numeric(10,2) := 0;
+  v_bobot_isian numeric(10,2) := 0;
+  v_skor_isian numeric(10,2) := 0;
+  v_bobot_jodoh numeric(10,2) := 0;
+  v_skor_jodoh numeric(10,2) := 0;
+  v_bobot_essay numeric(10,2) := 0;
+  v_skor_essay numeric(10,2) := 0;
+  v_pct_pg numeric(10,4) := 0;
+  v_pct_isian numeric(10,4) := 0;
+  v_pct_jodoh numeric(10,4) := 0;
+  v_pct_essay numeric(10,4) := 0;
+  v_active_pct numeric(10,4) := 0;
+  v_weighted_obj numeric(12,6) := 0;
+  v_weighted_total numeric(12,6) := 0;
   v_has_essay boolean := false;
   v_has_ungraded_essay boolean := false;
   v_skor numeric(6,2);
@@ -453,9 +472,24 @@ declare
   v_nilai numeric(6,2);
   v_nilai_sementara numeric(6,2);
 begin
+  v_jwt_role := coalesce(current_setting('request.jwt.claim.role', true), '');
+  v_internal := coalesce(current_setting('app.internal_grade', true), 'false');
+
+  if v_internal <> 'true' and v_jwt_role <> 'service_role' and auth.uid() is null then
+    raise exception 'Akses ditolak';
+  end if;
+
   select * into v_attempt from public.attempts where id = p_attempt_id;
   if not found then
     raise exception 'Percobaan ujian tidak ditemukan';
+  end if;
+
+  select * into v_exam from public.exams where id = v_attempt.exam_id;
+
+  if v_internal <> 'true' and v_jwt_role <> 'service_role' then
+    if not public.can_access_subject(v_exam.subject_id) then
+      raise exception 'Akses ditolak: hanya Admin atau Guru pengampu mapel yang berhak menghitung ulang nilai.';
+    end if;
   end if;
 
   for v_item in select * from jsonb_array_elements(v_attempt.question_order)
@@ -472,6 +506,7 @@ begin
     where attempt_id = p_attempt_id and question_id = v_q.id;
 
     if v_q.tipe = 'pg' then
+      v_bobot_pg := v_bobot_pg + v_q.bobot;
       v_skor := 0;
       if found and (v_ans.jawaban ? 'option_id') and nullif(v_ans.jawaban->>'option_id', '') is not null then
         if exists (
@@ -487,10 +522,12 @@ begin
       if found then
         update public.answers set skor = v_skor where id = v_ans.id;
       end if;
+      v_skor_pg := v_skor_pg + v_skor;
       v_obj_skor := v_obj_skor + v_skor;
       v_total_skor := v_total_skor + v_skor;
 
     elsif v_q.tipe = 'isian' then
+      v_bobot_isian := v_bobot_isian + v_q.bobot;
       v_skor := 0;
       if found and (v_ans.jawaban ? 'text') then
         v_norm_ans := lower(regexp_replace(trim(coalesce(v_ans.jawaban->>'text', '')), '\s+', ' ', 'g'));
@@ -506,10 +543,12 @@ begin
       if found then
         update public.answers set skor = v_skor where id = v_ans.id;
       end if;
+      v_skor_isian := v_skor_isian + v_skor;
       v_obj_skor := v_obj_skor + v_skor;
       v_total_skor := v_total_skor + v_skor;
 
     elsif v_q.tipe = 'jodoh' then
+      v_bobot_jodoh := v_bobot_jodoh + v_q.bobot;
       v_skor := 0;
       select count(*) into v_pair_total from public.question_options where question_id = v_q.id;
       v_pair_correct := 0;
@@ -527,11 +566,13 @@ begin
       if found then
         update public.answers set skor = v_skor where id = v_ans.id;
       end if;
+      v_skor_jodoh := v_skor_jodoh + v_skor;
       v_obj_skor := v_obj_skor + v_skor;
       v_total_skor := v_total_skor + v_skor;
 
     elsif v_q.tipe = 'essay' then
       v_has_essay := true;
+      v_bobot_essay := v_bobot_essay + v_q.bobot;
       if not found then
         -- Jika siswa tidak menjawab essay, pastikan tetap ada baris jawaban agar guru bisa melihat & menilai 0
         insert into public.answers (attempt_id, question_id, jawaban, ragu, skor)
@@ -541,19 +582,53 @@ begin
       elsif v_ans.skor is null then
         v_has_ungraded_essay := true;
       else
+        v_skor_essay := v_skor_essay + v_ans.skor;
         v_total_skor := v_total_skor + v_ans.skor;
       end if;
     end if;
   end loop;
 
-  v_nilai_sementara := case when v_total_bobot > 0 then round((v_obj_skor / v_total_bobot) * 100, 2) else 0 end;
+  if v_exam.bobot_tipe is not null and jsonb_typeof(v_exam.bobot_tipe) = 'object' then
+    v_pct_pg := greatest(coalesce(nullif(v_exam.bobot_tipe->>'pg', '')::numeric, 0), 0);
+    v_pct_isian := greatest(coalesce(nullif(v_exam.bobot_tipe->>'isian', '')::numeric, 0), 0);
+    v_pct_jodoh := greatest(coalesce(nullif(v_exam.bobot_tipe->>'jodoh', '')::numeric, 0), 0);
+    v_pct_essay := greatest(coalesce(nullif(v_exam.bobot_tipe->>'essay', '')::numeric, 0), 0);
 
-  if v_has_essay and v_has_ungraded_essay then
-    v_final_status := 'menunggu_koreksi';
-    v_nilai := null;
+    v_active_pct :=
+      (case when v_bobot_pg > 0 then v_pct_pg else 0 end) +
+      (case when v_bobot_isian > 0 then v_pct_isian else 0 end) +
+      (case when v_bobot_jodoh > 0 then v_pct_jodoh else 0 end) +
+      (case when v_bobot_essay > 0 then v_pct_essay else 0 end);
+  end if;
+
+  if v_active_pct > 0 then
+    v_weighted_obj :=
+      (case when v_bobot_pg > 0 then (v_skor_pg / v_bobot_pg) * v_pct_pg else 0 end) +
+      (case when v_bobot_isian > 0 then (v_skor_isian / v_bobot_isian) * v_pct_isian else 0 end) +
+      (case when v_bobot_jodoh > 0 then (v_skor_jodoh / v_bobot_jodoh) * v_pct_jodoh else 0 end);
+
+    v_weighted_total := v_weighted_obj +
+      (case when v_bobot_essay > 0 then (v_skor_essay / v_bobot_essay) * v_pct_essay else 0 end);
+
+    v_nilai_sementara := least(100, greatest(0, round((v_weighted_obj / v_active_pct) * 100, 2)));
+
+    if v_has_essay and v_has_ungraded_essay then
+      v_final_status := 'menunggu_koreksi';
+      v_nilai := null;
+    else
+      v_final_status := 'selesai';
+      v_nilai := least(100, greatest(0, round((v_weighted_total / v_active_pct) * 100, 2)));
+    end if;
   else
-    v_final_status := 'selesai';
-    v_nilai := case when v_total_bobot > 0 then round((v_total_skor / v_total_bobot) * 100, 2) else 0 end;
+    v_nilai_sementara := case when v_total_bobot > 0 then round((v_obj_skor / v_total_bobot) * 100, 2) else 0 end;
+
+    if v_has_essay and v_has_ungraded_essay then
+      v_final_status := 'menunggu_koreksi';
+      v_nilai := null;
+    else
+      v_final_status := 'selesai';
+      v_nilai := case when v_total_bobot > 0 then round((v_total_skor / v_total_bobot) * 100, 2) else 0 end;
+    end if;
   end if;
 
   update public.attempts

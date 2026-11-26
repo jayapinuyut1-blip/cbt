@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { generateExamToken } from "@/lib/auth-utils";
 import { formatDateTime, questionTypeLabel } from "@/lib/format";
@@ -23,11 +23,69 @@ import type {
   ExamRemedialRule,
   ExamResultVisibility,
   ExamSchedule,
+  ExamTypeWeights,
   Question,
+  QuestionType,
   SchoolClass,
   Subject,
 } from "@/types/cbt";
-import { Plus, Eye, Trash2, Edit3, X, CalendarClock } from "lucide-react";
+import {
+  Plus,
+  Eye,
+  Trash2,
+  Edit3,
+  X,
+  CalendarClock,
+  PieChart,
+  AlertTriangle,
+  CheckCircle2,
+} from "lucide-react";
+
+const QUESTION_TYPES_META: {
+  key: QuestionType;
+  label: string;
+  shortLabel: string;
+  barClass: string;
+  badgeClass: string;
+}[] = [
+  {
+    key: "pg",
+    label: "Pilihan Ganda",
+    shortLabel: "PG",
+    barClass: "bg-blue-500",
+    badgeClass: "bg-blue-50 text-blue-700 border-blue-200",
+  },
+  {
+    key: "isian",
+    label: "Isian Singkat",
+    shortLabel: "Isian",
+    barClass: "bg-emerald-500",
+    badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  },
+  {
+    key: "jodoh",
+    label: "Menjodohkan",
+    shortLabel: "Jodoh",
+    barClass: "bg-amber-500",
+    badgeClass: "bg-amber-50 text-amber-700 border-amber-200",
+  },
+  {
+    key: "essay",
+    label: "Essay / Uraian",
+    shortLabel: "Essay",
+    barClass: "bg-purple-500",
+    badgeClass: "bg-purple-50 text-purple-700 border-purple-200",
+  },
+];
+
+function formatBobotTipeSummary(weights?: ExamTypeWeights | null): string | null {
+  if (!weights) return null;
+  const parts = QUESTION_TYPES_META.map((m) => {
+    const val = Number(weights[m.key] ?? 0);
+    return val > 0 ? `${m.shortLabel} ${val}%` : null;
+  }).filter(Boolean);
+  return parts.length > 0 ? parts.join(" • ") : null;
+}
 
 function getTodayLocalDate(): string {
   const dt = new Date();
@@ -79,6 +137,17 @@ export default function GuruUjianPage() {
   const [bankQuestions, setBankQuestions] = useState<Question[]>([]);
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Mode & bobot persentase per tipe soal
+  const [weightMode, setWeightMode] = useState<"bobot_soal" | "persen_tipe">(
+    "bobot_soal"
+  );
+  const [typeWeights, setTypeWeights] = useState<Record<QuestionType, string>>({
+    pg: "70",
+    isian: "0",
+    jodoh: "0",
+    essay: "30",
+  });
 
   // Sinkronkan jam mulai, selesai, dan durasi otomatis saat tanggal / jam berubah
   function applySlot(dateVal: string, nextSlot: ExamSlotKey) {
@@ -179,6 +248,8 @@ export default function GuruUjianPage() {
       "Berdoalah sebelum mengerjakan. Periksa kembali jawaban Anda sebelum mengumpulkan ujian."
     );
     setSelectedQuestionIds([]);
+    setWeightMode("bobot_soal");
+    setTypeWeights({ pg: "70", isian: "0", jodoh: "0", essay: "30" });
     setEnableSchedule(true);
     setSelectedClassIds([]);
     const today = getTodayLocalDate();
@@ -213,6 +284,18 @@ export default function GuruUjianPage() {
     setTampilHasil(ex.tampil_hasil);
     setAturanRemedial(ex.aturan_remedial || "maks_kkm");
     setPetunjuk(ex.petunjuk || "");
+    if (ex.bobot_tipe && typeof ex.bobot_tipe === "object") {
+      setWeightMode("persen_tipe");
+      setTypeWeights({
+        pg: String(ex.bobot_tipe.pg ?? 0),
+        isian: String(ex.bobot_tipe.isian ?? 0),
+        jodoh: String(ex.bobot_tipe.jodoh ?? 0),
+        essay: String(ex.bobot_tipe.essay ?? 0),
+      });
+    } else {
+      setWeightMode("bobot_soal");
+      setTypeWeights({ pg: "70", isian: "0", jodoh: "0", essay: "30" });
+    }
 
     // Muat jadwal ujian yang ada (jika ada)
     const exSchedules = schedulesByExam[ex.id] || [];
@@ -263,6 +346,131 @@ export default function GuruUjianPage() {
     }
   }
 
+  const parsedTypeWeights = useMemo(() => {
+    const num = (v: string) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
+    };
+    const pg = num(typeWeights.pg);
+    const isian = num(typeWeights.isian);
+    const jodoh = num(typeWeights.jodoh);
+    const essay = num(typeWeights.essay);
+    const total = Math.round((pg + isian + jodoh + essay) * 100) / 100;
+    return { pg, isian, jodoh, essay, total };
+  }, [typeWeights]);
+
+  const compositionStats = useMemo(() => {
+    const sourceQuestions =
+      sourceMode === "manual"
+        ? bankQuestions.filter((q) => selectedQuestionIds.includes(q.id))
+        : bankQuestions;
+
+    const counts: Record<QuestionType, number> = {
+      pg: 0,
+      isian: 0,
+      jodoh: 0,
+      essay: 0,
+    };
+    const bobots: Record<QuestionType, number> = {
+      pg: 0,
+      isian: 0,
+      jodoh: 0,
+      essay: 0,
+    };
+    let totalCount = 0;
+    let totalBobot = 0;
+
+    for (const q of sourceQuestions) {
+      counts[q.tipe] += 1;
+      const b = Number(q.bobot) || 1;
+      bobots[q.tipe] += b;
+      totalCount += 1;
+      totalBobot += b;
+    }
+
+    const activeCustomPctSum = QUESTION_TYPES_META.reduce((acc, m) => {
+      return acc + (counts[m.key] > 0 ? parsedTypeWeights[m.key] : 0);
+    }, 0);
+
+    const rows = QUESTION_TYPES_META.map((m) => {
+      const count = counts[m.key];
+      const sumBobot = bobots[m.key];
+      const bobotPct = totalBobot > 0 ? (sumBobot / totalBobot) * 100 : 0;
+      const configuredPct = parsedTypeWeights[m.key];
+      const effectivePct =
+        weightMode === "persen_tipe"
+          ? sourceMode === "manual"
+            ? count > 0 && activeCustomPctSum > 0
+              ? (configuredPct / activeCustomPctSum) * 100
+              : 0
+            : parsedTypeWeights.total > 0
+            ? (configuredPct / parsedTypeWeights.total) * 100
+            : 0
+          : bobotPct;
+      const poinPerSoal =
+        sourceMode === "manual" && count > 0 ? effectivePct / count : null;
+
+      return {
+        ...m,
+        count,
+        sumBobot,
+        bobotPct,
+        configuredPct,
+        effectivePct,
+        poinPerSoal,
+      };
+    });
+
+    const missingWeightForSelected =
+      weightMode === "persen_tipe" && sourceMode === "manual"
+        ? rows.filter((r) => r.count > 0 && r.configuredPct <= 0)
+        : [];
+    const weightWithoutQuestions =
+      weightMode === "persen_tipe" && sourceMode === "manual"
+        ? rows.filter((r) => r.count === 0 && r.configuredPct > 0)
+        : [];
+
+    return {
+      totalCount,
+      totalBobot,
+      rows,
+      missingWeightForSelected,
+      weightWithoutQuestions,
+    };
+  }, [bankQuestions, selectedQuestionIds, sourceMode, weightMode, parsedTypeWeights]);
+
+  function applyWeightPreset(preset: Record<QuestionType, number>) {
+    setWeightMode("persen_tipe");
+    setTypeWeights({
+      pg: String(preset.pg),
+      isian: String(preset.isian),
+      jodoh: String(preset.jodoh),
+      essay: String(preset.essay),
+    });
+  }
+
+  function applyAutoWeightsFromSelected() {
+    const present = compositionStats.rows.filter((r) => r.count > 0);
+    if (present.length === 0) return;
+    const next: Record<QuestionType, number> = {
+      pg: 0,
+      isian: 0,
+      jodoh: 0,
+      essay: 0,
+    };
+    let assigned = 0;
+    present.forEach((r, idx) => {
+      if (idx === present.length - 1) {
+        next[r.key] = Math.max(0, Math.round(100 - assigned));
+      } else {
+        const val = Math.round(r.bobotPct);
+        next[r.key] = val;
+        assigned += val;
+      }
+    });
+    applyWeightPreset(next);
+  }
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!judul.trim() || !subjectId) return;
@@ -271,6 +479,26 @@ export default function GuruUjianPage() {
         "Pilih minimal 1 soal dari bank soal, atau gunakan mode Acak dari Bank."
       );
       return;
+    }
+    if (weightMode === "persen_tipe") {
+      if (Math.abs(parsedTypeWeights.total - 100) > 0.01) {
+        alert(
+          `Total persentase bobot tipe soal harus tepat 100% (saat ini ${parsedTypeWeights.total}%).`
+        );
+        return;
+      }
+      if (
+        sourceMode === "manual" &&
+        compositionStats.missingWeightForSelected.length > 0
+      ) {
+        const names = compositionStats.missingWeightForSelected
+          .map((r) => r.label)
+          .join(", ");
+        const ok = confirm(
+          `Peringatan: Soal bertipe ${names} ada di paket ujian ini tetapi persentasenya 0% (tidak menambah nilai). Tetap simpan?`
+        );
+        if (!ok) return;
+      }
     }
     if (enableSchedule && selectedClassIds.length === 0) {
       alert(
@@ -281,7 +509,17 @@ export default function GuruUjianPage() {
 
     setSaving(true);
     try {
-      const payload = {
+      const bobotTipeValue: ExamTypeWeights | null =
+        weightMode === "persen_tipe"
+          ? {
+              pg: parsedTypeWeights.pg,
+              isian: parsedTypeWeights.isian,
+              jodoh: parsedTypeWeights.jodoh,
+              essay: parsedTypeWeights.essay,
+            }
+          : null;
+
+      const basePayload = {
         judul: judul.trim(),
         subject_id: Number(subjectId),
         guru_id: userId,
@@ -300,20 +538,47 @@ export default function GuruUjianPage() {
         tampil_hasil: tampilHasil,
         aturan_remedial: aturanRemedial,
       };
+      const payload = { ...basePayload, bobot_tipe: bobotTipeValue };
 
       let targetId = editingId;
       if (editingId) {
-        const { error } = await supabase
+        let { error } = await supabase
           .from("exams")
           .update(payload)
           .eq("id", editingId);
+        if (error && error.message?.includes("bobot_tipe")) {
+          if (weightMode === "persen_tipe") {
+            throw new Error(
+              "Kolom bobot_tipe belum tersedia di database. Jalankan file supabase/patch_exam_type_weights.sql di Supabase SQL Editor terlebih dahulu."
+            );
+          }
+          const retry = await supabase
+            .from("exams")
+            .update(basePayload)
+            .eq("id", editingId);
+          error = retry.error;
+        }
         if (error) throw error;
       } else {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from("exams")
           .insert({ ...payload, token: generateExamToken() })
           .select("id")
           .single();
+        if (error && error.message?.includes("bobot_tipe")) {
+          if (weightMode === "persen_tipe") {
+            throw new Error(
+              "Kolom bobot_tipe belum tersedia di database. Jalankan file supabase/patch_exam_type_weights.sql di Supabase SQL Editor terlebih dahulu."
+            );
+          }
+          const retry = await supabase
+            .from("exams")
+            .insert({ ...basePayload, token: generateExamToken() })
+            .select("id")
+            .single();
+          data = retry.data;
+          error = retry.error;
+        }
         if (error || !data) throw error || new Error("Gagal membuat ujian");
         targetId = data.id;
       }
@@ -453,6 +718,16 @@ export default function GuruUjianPage() {
                     : ex.tampil_hasil === "nilai"
                     ? "Nilai saja"
                     : "Nilai + Kunci"}
+                </span>
+                <span
+                  className={
+                    formatBobotTipeSummary(ex.bobot_tipe)
+                      ? "text-purple-700 font-semibold"
+                      : "text-slate-500"
+                  }
+                >
+                  Bobot:{" "}
+                  {formatBobotTipeSummary(ex.bobot_tipe) || "Otomatis per soal"}
                 </span>
               </div>
 
@@ -968,9 +1243,12 @@ export default function GuruUjianPage() {
                             checked={selectedQuestionIds.includes(q.id)}
                             onChange={() => toggleQuestion(q.id)}
                           />
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <span className="font-semibold text-blue-700 mr-1.5">
                               [{questionTypeLabel(q.tipe)}]
+                            </span>
+                            <span className="text-[11px] text-slate-500 mr-1.5">
+                              (Bobot {q.bobot})
                             </span>
                             <span className="text-slate-800 line-clamp-2">
                               {idx + 1}. {q.teks}
@@ -986,6 +1264,244 @@ export default function GuruUjianPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Indikator Persentase Nilai & Mode Bobot per Tipe Soal */}
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                      <PieChart className="w-4 h-4 text-purple-600" />
+                      Komposisi & Persentase Nilai per Tipe Soal
+                    </div>
+                    <span className="text-[11px] text-slate-500">
+                      {sourceMode === "manual"
+                        ? `${compositionStats.totalCount} soal dipilih • Total bobot soal: ${compositionStats.totalBobot}`
+                        : `Bank mapel: ${compositionStats.totalCount} soal`}
+                    </span>
+                  </div>
+
+                  {/* Mode Penilaian Toggle */}
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setWeightMode("bobot_soal")}
+                      className={`text-left p-2.5 rounded-lg border text-xs transition cursor-pointer ${
+                        weightMode === "bobot_soal"
+                          ? "bg-blue-50 border-blue-400 text-blue-950 ring-1 ring-blue-300"
+                          : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="font-semibold">
+                        Otomatis dari Bobot Soal (Default)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Nilai dihitung proporsional sesuai bobot tiap soal di Bank Soal.
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWeightMode("persen_tipe")}
+                      className={`text-left p-2.5 rounded-lg border text-xs transition cursor-pointer ${
+                        weightMode === "persen_tipe"
+                          ? "bg-purple-50 border-purple-400 text-purple-950 ring-1 ring-purple-300"
+                          : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="font-semibold">
+                        Atur Persentase per Tipe Soal (Opsional)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Tetapkan porsi tetap, misal 70% PG & 30% Essay (total 100%).
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Input Persentase + Preset jika Mode Persentase per Tipe Aktif */}
+                  {weightMode === "persen_tipe" && (
+                    <div className="bg-white rounded-lg border border-purple-200 p-3 space-y-3">
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <span className="font-semibold text-slate-600 mr-1">
+                          Preset Cepat:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            applyWeightPreset({
+                              pg: 70,
+                              isian: 0,
+                              jodoh: 0,
+                              essay: 30,
+                            })
+                          }
+                          className="px-2 py-0.5 rounded bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 font-medium cursor-pointer"
+                        >
+                          70% PG : 30% Essay
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            applyWeightPreset({
+                              pg: 80,
+                              isian: 0,
+                              jodoh: 0,
+                              essay: 20,
+                            })
+                          }
+                          className="px-2 py-0.5 rounded bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 font-medium cursor-pointer"
+                        >
+                          80% PG : 20% Essay
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            applyWeightPreset({
+                              pg: 50,
+                              isian: 15,
+                              jodoh: 15,
+                              essay: 20,
+                            })
+                          }
+                          className="px-2 py-0.5 rounded bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 font-medium cursor-pointer"
+                        >
+                          50 / 15 / 15 / 20 (4 Tipe)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            applyWeightPreset({
+                              pg: 60,
+                              isian: 20,
+                              jodoh: 20,
+                              essay: 0,
+                            })
+                          }
+                          className="px-2 py-0.5 rounded bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 font-medium cursor-pointer"
+                        >
+                          60 / 20 / 20 (Objektif)
+                        </button>
+                        {compositionStats.totalCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={applyAutoWeightsFromSelected}
+                            className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 font-medium cursor-pointer"
+                          >
+                            Ikuti Soal Dipilih
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        {QUESTION_TYPES_META.map((m) => (
+                          <div key={m.key}>
+                            <label className="block text-[11px] font-medium text-slate-700 mb-1">
+                              {m.label} (%)
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                step="1"
+                                value={typeWeights[m.key]}
+                                onChange={(e) =>
+                                  setTypeWeights((prev) => ({
+                                    ...prev,
+                                    [m.key]: e.target.value,
+                                  }))
+                                }
+                                className="w-full px-2.5 py-1.5 pr-7 rounded-lg border border-slate-300 text-sm font-semibold"
+                              />
+                              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+                                %
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
+                        {Math.abs(parsedTypeWeights.total - 100) <= 0.01 ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Total: 100%
+                            (Valid)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-red-600 font-semibold">
+                            <AlertTriangle className="w-3.5 h-3.5" /> Total:{" "}
+                            {parsedTypeWeights.total}% (Harus tepat 100%)
+                          </span>
+                        )}
+                        <span className="text-[11px] text-slate-500">
+                          Di dalam tipe yg sama, soal tetap proporsional sesuai bobot soalnya.
+                        </span>
+                      </div>
+
+                      {compositionStats.missingWeightForSelected.length > 0 && (
+                        <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                          <span>
+                            Tipe{" "}
+                            <b>
+                              {compositionStats.missingWeightForSelected
+                                .map((r) => r.label)
+                                .join(", ")}
+                            </b>{" "}
+                            memiliki soal terpilih tetapi persentasenya masih 0%.
+                          </span>
+                        </div>
+                      )}
+                      {compositionStats.weightWithoutQuestions.length > 0 && (
+                        <div className="text-[11px] text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5">
+                          Info: Tipe{" "}
+                          <b>
+                            {compositionStats.weightWithoutQuestions
+                              .map((r) => r.label)
+                              .join(", ")}
+                          </b>{" "}
+                          belum memiliki soal terpilih. Jika tidak ada soalnya saat ujian, porsi otomatis dinormalisasi ke tipe yang hadir.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Progress Bar & Ringkasan Otomatis per Tipe Soal */}
+                  <div className="space-y-2">
+                    <div className="h-2.5 w-full rounded-full bg-slate-200 overflow-hidden flex">
+                      {compositionStats.rows.map((r) =>
+                        r.effectivePct > 0 ? (
+                          <div
+                            key={r.key}
+                            style={{ width: `${r.effectivePct}%` }}
+                            className={`${r.barClass} transition-all duration-200`}
+                            title={`${r.label}: ${r.effectivePct.toFixed(1)}%`}
+                          />
+                        ) : null
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {compositionStats.rows.map((r) => (
+                        <div
+                          key={r.key}
+                          className={`rounded-lg border px-2.5 py-2 text-[11px] ${
+                            r.effectivePct > 0 || r.count > 0
+                              ? r.badgeClass
+                              : "bg-white border-slate-200 text-slate-400"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between font-bold">
+                            <span>{r.shortLabel}</span>
+                            <span>{r.effectivePct.toFixed(1)}%</span>
+                          </div>
+                          <div className="mt-0.5 text-[10px] opacity-85">
+                            {r.count} soal
+                            {r.poinPerSoal !== null
+                              ? ` • ~${r.poinPerSoal.toFixed(2)} poin/soal`
+                              : ""}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">

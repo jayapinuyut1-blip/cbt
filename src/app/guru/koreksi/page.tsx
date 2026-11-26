@@ -199,18 +199,36 @@ export default function GuruKoreksiPage() {
       </div>
 
       <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
-        <select
-          value={selectedExamId}
-          onChange={(e) => setSelectedExamId(e.target.value)}
-          className="flex-1 min-w-60 px-3 py-2 rounded-lg border border-slate-300 text-sm"
-        >
-          <option value="">-- Pilih Ujian --</option>
-          {exams.map((ex) => (
-            <option key={ex.id} value={ex.id}>
-              {ex.judul} ({ex.subjects?.nama})
-            </option>
-          ))}
-        </select>
+        <div className="flex-1 min-w-60 space-y-1.5">
+          <select
+            value={selectedExamId}
+            onChange={(e) => setSelectedExamId(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
+          >
+            <option value="">-- Pilih Ujian --</option>
+            {exams.map((ex) => (
+              <option key={ex.id} value={ex.id}>
+                {ex.judul} ({ex.subjects?.nama})
+              </option>
+            ))}
+          </select>
+          {selectedExam?.bobot_tipe && (
+            <div className="text-xs text-purple-800 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1 inline-flex flex-wrap items-center gap-1.5">
+              <span className="font-semibold">Skema Bobot Persentase:</span>
+              {(["pg", "isian", "jodoh", "essay"] as const)
+                .filter((k) => Number(selectedExam.bobot_tipe?.[k] ?? 0) > 0)
+                .map((k) => (
+                  <span key={k} className="px-1.5 py-0.5 bg-white rounded border border-purple-200 font-medium">
+                    {k === "pg" ? "PG" : k === "isian" ? "Isian" : k === "jodoh" ? "Jodoh" : "Essay"}{" "}
+                    {selectedExam.bobot_tipe?.[k]}%
+                  </span>
+                ))}
+              <span className="text-purple-600">
+                (Skor essay 0–bobot soal otomatis dikonversi ke porsi %)
+              </span>
+            </div>
+          )}
+        </div>
 
         <div className="flex gap-2">
           <button
