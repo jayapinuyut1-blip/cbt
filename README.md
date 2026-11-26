@@ -52,10 +52,10 @@ Buka `http://localhost:3000/setup` untuk membuat akun **Admin** pertama kali.
 5. Setelah live, buka `https://domain-anda/setup` sekali saja untuk membuat akun Admin pertama (setelah Admin ada, `/setup` otomatis terkunci).
 
 ### 4. Hubungkan Subdomain Sekolah di cPanel Rumahweb → Vercel
-1. Di **Vercel Project Settings → Domains**, tambahkan `dbt.smkn3kotamobagu.sch.id`.
+1. Di **Vercel Project Settings → Domains**, tambahkan `cbt.smkn3kotamobagu.sch.id`.
 2. Di **cPanel Rumahweb → Zone Editor → Manage** pada domain `smkn3kotamobagu.sch.id`, tambah record:
    - **Type:** `CNAME`
-   - **Name:** `dbt`
+   - **Name:** `cbt`
    - **Record / Target:** `cname.vercel-dns.com`
 3. Tunggu propagasi DNS (biasanya 5–30 menit); SSL HTTPS akan aktif otomatis dari Vercel.
 
