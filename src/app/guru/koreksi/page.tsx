@@ -12,6 +12,8 @@ import {
   type RemedialRule,
 } from "@/lib/remedial";
 import RemedialModal from "@/components/RemedialModal";
+import EssayAiGradingPanel from "@/components/guru/EssayAiGradingPanel";
+import type { EssayAiSuggestion } from "@/lib/essay-ai";
 import {
   analyzeItems,
   summarizeAnalysis,
@@ -25,6 +27,7 @@ import {
   RotateCcw,
   BarChart3,
   AlertTriangle,
+  Bot,
 } from "lucide-react";
 
 interface EssayAnswerRow {
@@ -63,7 +66,11 @@ export default function GuruKoreksiPage() {
   const [essayRows, setEssayRows] = useState<EssayAnswerRow[]>([]);
   const [allAnswerRows, setAllAnswerRows] = useState<AnalysisAnswerRow[]>([]);
   const [scoreInputs, setScoreInputs] = useState<Record<number, string>>({});
+  const [aiSuggestions, setAiSuggestions] = useState<
+    Record<number, EssayAiSuggestion>
+  >({});
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [savingBatch, setSavingBatch] = useState(false);
   const [rawAttempts, setRawAttempts] = useState<RawStudentAttempt[]>([]);
 
   const [remedialModalOpen, setRemedialModalOpen] = useState(false);
@@ -163,6 +170,7 @@ export default function GuruKoreksiPage() {
       initialScores[row.id] = row.skor !== null ? String(row.skor) : "";
     });
     setScoreInputs(initialScores);
+    setAiSuggestions({});
   }, [supabase, selectedExamId]);
 
   useEffect(() => {
@@ -218,11 +226,83 @@ export default function GuruKoreksiPage() {
       });
       if (rpcErr) throw rpcErr;
 
+      setAiSuggestions((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
       await loadData();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Gagal menyimpan skor.");
     } finally {
       setSavingId(null);
+    }
+  }
+
+  function handleApplyAiSuggestions(suggestions: EssayAiSuggestion[]) {
+    setAiSuggestions((prev) => {
+      const next = { ...prev };
+      for (const s of suggestions) next[s.answerId] = s;
+      return next;
+    });
+    setScoreInputs((prev) => {
+      const next = { ...prev };
+      for (const s of suggestions) next[s.answerId] = String(s.score);
+      return next;
+    });
+  }
+
+  async function saveAllAiDrafts() {
+    const draftRows = essayRows.filter((r) => Boolean(aiSuggestions[r.id]));
+    if (draftRows.length === 0) return;
+
+    // Validasi semua angka sebelum menyimpan ke database
+    const updates: Array<{ row: EssayAnswerRow; val: number }> = [];
+    for (const row of draftRows) {
+      const raw = scoreInputs[row.id];
+      const maxBobot = row.questions?.bobot ?? 100;
+      const val = Number(raw);
+      if (raw === "" || raw === undefined || Number.isNaN(val) || val < 0 || val > maxBobot) {
+        alert(
+          `Skor untuk ${row.attempts?.profiles?.nama || "siswa"} harus antara 0 sampai ${maxBobot}.`
+        );
+        return;
+      }
+      updates.push({ row, val });
+    }
+
+    setSavingBatch(true);
+    try {
+      const affectedAttempts = new Set<number>();
+      for (const { row, val } of updates) {
+        const { error } = await supabase
+          .from("answers")
+          .update({ skor: val })
+          .eq("id", row.id);
+        if (error) throw error;
+        affectedAttempts.add(row.attempt_id);
+      }
+
+      // Hitung ulang nilai akhir sekali per attempt unik (hemat RPC)
+      for (const attemptId of affectedAttempts) {
+        const { error: rpcErr } = await supabase.rpc("recalculate_attempt_score", {
+          p_attempt_id: attemptId,
+        });
+        if (rpcErr) throw rpcErr;
+      }
+
+      alert(
+        `Berhasil menyimpan ${updates.length} skor essay dan memperbarui nilai ${affectedAttempts.size} peserta.`
+      );
+      await loadData();
+    } catch (err) {
+      alert(
+        err instanceof Error
+          ? err.message
+          : "Gagal menyimpan sebagian skor essay."
+      );
+    } finally {
+      setSavingBatch(false);
     }
   }
 
@@ -371,11 +451,29 @@ export default function GuruKoreksiPage() {
 
       {tab === "essay" ? (
         <div className="space-y-3">
-          {essayRows.map((row) => (
+          {selectedExam && (
+            <EssayAiGradingPanel
+              examId={selectedExam.id}
+              subjectName={selectedExam.subjects?.nama || ""}
+              essayRows={essayRows}
+              draftCount={Object.keys(aiSuggestions).length}
+              savingBatch={savingBatch}
+              onApplySuggestions={handleApplyAiSuggestions}
+              onSaveAllDrafts={saveAllAiDrafts}
+            />
+          )}
+
+          {essayRows.map((row) => {
+            const suggestion = aiSuggestions[row.id];
+            return (
             <div
               key={row.id}
               className={`bg-white rounded-xl border p-5 space-y-3 ${
-                row.skor === null ? "border-amber-300" : "border-slate-200"
+                suggestion
+                  ? "border-[var(--cbt-accent)]"
+                  : row.skor === null
+                  ? "border-amber-300"
+                  : "border-slate-200"
               }`}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -425,9 +523,46 @@ export default function GuruKoreksiPage() {
                 </div>
               </div>
 
+              {suggestion && (
+                <div
+                  className="p-3 rounded-lg border text-xs flex flex-wrap items-start justify-between gap-2"
+                  style={{
+                    backgroundColor: "var(--cbt-accent-soft)",
+                    borderColor: "var(--cbt-nav-active-ring)",
+                  }}
+                >
+                  <div className="space-y-0.5 text-slate-800">
+                    <div
+                      className="font-semibold inline-flex items-center gap-1.5"
+                      style={{ color: "var(--cbt-accent)" }}
+                    >
+                      <Bot className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>
+                        Usulan AI (Draf, belum disimpan): {suggestion.score} /{" "}
+                        {row.questions?.bobot}
+                      </span>
+                    </div>
+                    <div className="text-slate-700">{suggestion.reason}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAiSuggestions((prev) => {
+                        const next = { ...prev };
+                        delete next[row.id];
+                        return next;
+                      })
+                    }
+                    className="text-[11px] text-slate-600 hover:underline font-medium"
+                  >
+                    Tutup catatan
+                  </button>
+                </div>
+              )}
+
               <div className="flex items-center gap-3 pt-1">
                 <label className="text-xs font-medium text-slate-700">
-                  Skor (0 – {row.questions?.bobot}):
+                  Skor (0 - {row.questions?.bobot}):
                 </label>
                 <input
                   type="number"
@@ -445,14 +580,15 @@ export default function GuruKoreksiPage() {
                 />
                 <button
                   onClick={() => saveEssayScore(row)}
-                  disabled={savingId === row.id}
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold cursor-pointer"
+                  disabled={savingId === row.id || savingBatch}
+                  className="px-4 py-1.5 cbt-btn-primary disabled:opacity-50 rounded-lg text-xs font-semibold cursor-pointer"
                 >
                   {savingId === row.id ? "Menyimpan..." : "Simpan Skor"}
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
           {essayRows.length === 0 && (
             <div className="bg-white rounded-xl border border-slate-200 p-10 text-center text-slate-400 text-sm">
               Tidak ada jawaban essay untuk dikoreksi pada ujian ini.
