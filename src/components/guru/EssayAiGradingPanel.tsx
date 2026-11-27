@@ -247,8 +247,7 @@ export default function EssayAiGradingPanel({
     );
   }
 
-  if (essayRows.length === 0) return null;
-
+  const hasEssays = essayRows.length > 0;
   const pct =
     progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
 
@@ -280,7 +279,9 @@ export default function EssayAiGradingPanel({
               </h2>
               <p className="text-xs text-slate-600 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span>
-                  AI memberi usulan skor dan alasan 1 kalimat sebagai draf. Guru tetap menentukan nilai akhir.
+                  {hasEssays
+                    ? "AI memberi usulan skor dan alasan 1 kalimat sebagai draf. Guru tetap menentukan nilai akhir."
+                    : "Belum ada jawaban essay masuk pada ujian ini. Tombol koreksi AI akan aktif otomatis setelah siswa mengumpulkan jawaban essay."}
                 </span>
                 <span className="inline-flex items-center gap-1 text-emerald-800 font-medium">
                   <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
@@ -293,9 +294,9 @@ export default function EssayAiGradingPanel({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={running}
+              disabled={running || !hasEssays}
               onClick={() => setShowRubrics((v) => !v)}
-              className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold transition"
+              className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-800 text-xs font-semibold transition"
             >
               <BookOpenCheck className="w-4 h-4" aria-hidden="true" />
               <span>Rubrik Kunci ({uniqueQuestions.length} soal)</span>
@@ -308,9 +309,9 @@ export default function EssayAiGradingPanel({
 
             <button
               type="button"
-              disabled={running}
+              disabled={running || !hasEssays}
               onClick={() => setShowPromptMode((v) => !v)}
-              className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 text-xs font-semibold transition"
+              className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-800 text-xs font-semibold transition"
             >
               <ClipboardPaste className="w-4 h-4" aria-hidden="true" />
               <span>Mode Prompt Gratis</span>
