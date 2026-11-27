@@ -13,7 +13,7 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "CBT Sekolah — Ujian Berbasis Komputer",
+  title: "CBT Sekolah: Ujian Berbasis Komputer",
   description: "Aplikasi Ujian Online Ringan untuk Sekolah",
 };
 

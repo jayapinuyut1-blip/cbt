@@ -7,6 +7,7 @@ import {
   CalendarClock,
   Activity,
   Download,
+  Palette,
 } from "lucide-react";
 
 export default async function AdminDashboardPage() {
@@ -45,91 +46,186 @@ export default async function AdminDashboardPage() {
       .maybeSingle(),
   ]);
 
-  const stats = [
-    { label: "Siswa Aktif", value: siswaCount || 0, icon: Users, color: "bg-blue-50 text-blue-700" },
-    { label: "Guru Aktif", value: guruCount || 0, icon: Users, color: "bg-indigo-50 text-indigo-700" },
-    { label: "Kelas", value: kelasCount || 0, icon: BookOpen, color: "bg-emerald-50 text-emerald-700" },
-    { label: "Total Bank Soal", value: soalCount || 0, icon: FileText, color: "bg-amber-50 text-amber-700" },
-    { label: "Paket Ujian", value: ujianCount || 0, icon: CalendarClock, color: "bg-purple-50 text-purple-700" },
-    { label: "Sedang Mengerjakan", value: activeAttempts || 0, icon: Activity, color: "bg-rose-50 text-rose-700" },
+  const activeCount = activeAttempts || 0;
+
+  const schoolMetrics = [
+    { label: "Siswa Aktif", value: siswaCount || 0, icon: Users },
+    { label: "Guru Aktif", value: guruCount || 0, icon: Users },
+    { label: "Kelas", value: kelasCount || 0, icon: BookOpen },
+    { label: "Total Bank Soal", value: soalCount || 0, icon: FileText },
+    { label: "Paket Ujian", value: ujianCount || 0, icon: CalendarClock },
   ];
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Beranda Admin</h1>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-slate-600 mt-0.5">
             Tahun Ajaran Aktif:{" "}
-            <span className="font-semibold text-slate-800">
+            <span className="font-semibold text-slate-900">
               {activeYear?.nama || "Belum diatur"}
             </span>
           </p>
         </div>
         <a
           href="/api/admin/backup"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-medium"
+          className="inline-flex items-center gap-2 min-h-[44px] px-4 py-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 rounded-lg text-sm font-semibold transition"
         >
-          <Download className="w-4 h-4" />
-          Backup Database (.sql)
+          <Download className="w-4 h-4" aria-hidden="true" />
+          <span>Backup Database (.sql)</span>
         </a>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        {stats.map((s) => {
-          const Icon = s.icon;
-          return (
+      {/* Fokus Utama: Status Pelaksanaan Ujian Berjalan */}
+      <section
+        aria-label="Status pelaksanaan ujian saat ini"
+        className="bg-white rounded-2xl border border-slate-200 overflow-hidden"
+      >
+        <div
+          className="h-1"
+          style={{ background: "var(--cbt-auth-bar)" }}
+          aria-hidden="true"
+        />
+        <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-start gap-4">
             <div
-              key={s.label}
-              className="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-4"
+              className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+              style={{
+                backgroundColor: "var(--cbt-accent-soft)",
+                color: "var(--cbt-accent)",
+              }}
             >
-              <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${s.color}`}>
-                <Icon className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-slate-900">{s.value}</div>
-                <div className="text-xs text-slate-500">{s.label}</div>
-              </div>
+              <Activity className="w-6 h-6" aria-hidden="true" />
             </div>
-          );
-        })}
-      </div>
-
-      <div className="grid md:grid-cols-3 gap-4">
-        <Link
-          href="/admin/monitoring"
-          className="bg-white rounded-xl border border-slate-200 p-5 hover:border-blue-400 transition"
-        >
-          <div className="font-semibold text-slate-900 mb-1">
-            Monitoring Real-time
+            <div>
+              <div className="text-xs font-semibold text-slate-600">
+                Sedang Mengerjakan Ujian Saat Ini
+              </div>
+              <div className="text-3xl font-extrabold text-slate-900 leading-tight mt-0.5">
+                {activeCount}{" "}
+                <span className="text-sm font-medium text-slate-600">
+                  peserta aktif
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-1">
+                Pantau log pelanggaran, buka kunci layar terkunci, reset login, atau tambah waktu peserta dari halaman Monitoring.
+              </p>
+            </div>
           </div>
-          <p className="text-sm text-slate-500">
-            Pantau status peserta, log pindah tab, reset login, tambah waktu, atau paksa selesai.
-          </p>
-        </Link>
+          <Link
+            href="/admin/monitoring"
+            className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 py-2.5 cbt-btn-primary rounded-xl text-sm font-semibold shrink-0 transition"
+          >
+            <Activity className="w-4 h-4" aria-hidden="true" />
+            <span>Buka Monitoring Ujian</span>
+          </Link>
+        </div>
+      </section>
+
+      {/* Ringkasan Data Sekolah (Palet Netral + 1 Aksen Tema, Tanpa Warna Pelangi) */}
+      <section aria-label="Ringkasan data sekolah" className="space-y-2.5">
+        <h2 className="text-xs font-semibold text-slate-600">
+          Ringkasan Data Sekolah
+        </h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {schoolMetrics.map((m) => {
+            const Icon = m.icon;
+            return (
+              <div
+                key={m.label}
+                className="bg-white rounded-xl border border-slate-200 p-4 space-y-2"
+              >
+                <div className="flex items-center justify-between text-slate-600">
+                  <span className="text-xs font-medium">{m.label}</span>
+                  <Icon className="w-4 h-4 opacity-70" aria-hidden="true" />
+                </div>
+                <div className="text-2xl font-bold text-slate-900">
+                  {m.value}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Pintasan Operasional Harian (Komposisi Variatif, Bukan 3 Kartu Identik) */}
+      <section aria-label="Pintasan operasional" className="grid lg:grid-cols-12 gap-4">
         <Link
           href="/admin/jadwal"
-          className="bg-white rounded-xl border border-slate-200 p-5 hover:border-blue-400 transition"
+          className="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-5 hover:border-[var(--cbt-accent)] transition flex flex-col justify-between gap-3"
         >
-          <div className="font-semibold text-slate-900 mb-1">
-            Jadwal, Token & Daftar Hadir
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-slate-900 font-semibold">
+              <CalendarClock
+                className="w-4 h-4"
+                style={{ color: "var(--cbt-accent)" }}
+                aria-hidden="true"
+              />
+              <span>Jadwal, Token &amp; Berita Acara</span>
+            </div>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Atur sesi kelas (Jam II / Jam III), perbarui token 6 karakter, kelola susulan per siswa, dan cetak daftar hadir serta berita acara ujian.
+            </p>
           </div>
-          <p className="text-sm text-slate-500">
-            Atur sesi ujian kelas, ganti token 6 karakter, pengecualian susulan, dan cetak daftar hadir.
-          </p>
+          <span
+            className="text-xs font-semibold"
+            style={{ color: "var(--cbt-accent)" }}
+          >
+            Kelola jadwal ujian
+          </span>
         </Link>
+
         <Link
           href="/admin/pengguna"
-          className="bg-white rounded-xl border border-slate-200 p-5 hover:border-blue-400 transition"
+          className="lg:col-span-4 bg-white rounded-xl border border-slate-200 p-5 hover:border-[var(--cbt-accent)] transition flex flex-col justify-between gap-3"
         >
-          <div className="font-semibold text-slate-900 mb-1">
-            Impor Excel & Kartu Login
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-slate-900 font-semibold">
+              <Users
+                className="w-4 h-4"
+                style={{ color: "var(--cbt-accent)" }}
+                aria-hidden="true"
+              />
+              <span>Siswa, Guru &amp; Kartu Login</span>
+            </div>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Impor akun dari Excel, atur mapel ampu guru, kelola kenaikan kelas, dan cetak kartu login peserta.
+            </p>
           </div>
-          <p className="text-sm text-slate-500">
-            Impor data siswa dan guru dari Excel, buat sandi otomatis, lalu cetak kartu login peserta.
-          </p>
+          <span
+            className="text-xs font-semibold"
+            style={{ color: "var(--cbt-accent)" }}
+          >
+            Buka daftar pengguna
+          </span>
         </Link>
-      </div>
+
+        <Link
+          href="/admin/pengaturan"
+          className="lg:col-span-3 bg-white rounded-xl border border-slate-200 p-5 hover:border-[var(--cbt-accent)] transition flex flex-col justify-between gap-3"
+        >
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-slate-900 font-semibold">
+              <Palette
+                className="w-4 h-4"
+                style={{ color: "var(--cbt-accent)" }}
+                aria-hidden="true"
+              />
+              <span>Identitas &amp; Tema</span>
+            </div>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Ubah logo sekolah, banner pengumuman login, dan tema tampilan Mobile maupun Desktop.
+            </p>
+          </div>
+          <span
+            className="text-xs font-semibold"
+            style={{ color: "var(--cbt-accent)" }}
+          >
+            Atur tampilan
+          </span>
+        </Link>
+      </section>
     </div>
   );
 }

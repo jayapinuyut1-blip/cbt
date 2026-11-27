@@ -142,43 +142,47 @@ export default function AdminPengaturanPage() {
           </h2>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label htmlFor="school-name" className="block text-sm font-medium text-slate-700 mb-1">
               Nama Sekolah
             </label>
             <input
+              id="school-name"
               type="text"
               required
               value={namaSekolah}
               onChange={(e) => setNamaSekolah(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-base sm:text-sm"
+              className="w-full min-h-[42px] px-3 py-2 rounded-lg border border-slate-300 text-base sm:text-sm"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label htmlFor="school-address" className="block text-sm font-medium text-slate-700 mb-1">
               Alamat Sekolah
             </label>
             <input
+              id="school-address"
               type="text"
               value={alamatSekolah}
               onChange={(e) => setAlamatSekolah(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-base sm:text-sm"
+              className="w-full min-h-[42px] px-3 py-2 rounded-lg border border-slate-300 text-base sm:text-sm"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
+            <span className="block text-sm font-medium text-slate-700 mb-2">
               Logo Sekolah
-            </label>
+            </span>
             <div className="flex flex-wrap items-center gap-4">
               {logo ? (
                 <img
                   src={logo}
                   alt="Logo Sekolah"
+                  width={64}
+                  height={64}
                   className="w-16 h-16 object-contain rounded-xl border border-slate-200 p-1.5 bg-white"
                 />
               ) : (
-                <div className="w-16 h-16 rounded-xl border border-dashed border-slate-300 flex items-center justify-center text-xs text-slate-400">
+                <div className="w-16 h-16 rounded-xl border border-dashed border-slate-300 flex items-center justify-center text-xs text-slate-600">
                   Belum ada
                 </div>
               )}
@@ -252,8 +256,8 @@ export default function AdminPengaturanPage() {
               </div>
             </div>
             {isThemeDirty && (
-              <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">
-                Pratinjau aktif — belum disimpan
+              <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-amber-100 text-amber-900 border border-amber-200">
+                Pratinjau aktif, belum disimpan
               </span>
             )}
           </div>
@@ -265,10 +269,11 @@ export default function AdminPengaturanPage() {
                 <button
                   key={item.id}
                   type="button"
+                  aria-pressed={selected}
                   onClick={() => handleSelectTheme(item.id)}
-                  className={`text-left rounded-xl border-2 p-3.5 transition cursor-pointer flex flex-col gap-3 ${
+                  className={`text-left rounded-xl border-2 p-3.5 transition flex flex-col gap-3 ${
                     selected
-                      ? "border-blue-600 ring-2 ring-blue-100 bg-blue-50/30"
+                      ? "border-[var(--cbt-accent)] bg-[var(--cbt-accent-soft)]/50"
                       : "border-slate-200 hover:border-slate-300 bg-white"
                   }`}
                 >
@@ -350,17 +355,22 @@ export default function AdminPengaturanPage() {
                         {item.name}
                       </span>
                       <span
-                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 inline-flex items-center gap-1 ${
+                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-md shrink-0 inline-flex items-center gap-1 ${
                           selected
-                            ? "bg-blue-600 text-white"
-                            : "bg-slate-100 text-slate-600"
+                            ? "text-white"
+                            : "bg-slate-100 text-slate-700"
                         }`}
+                        style={
+                          selected
+                            ? { backgroundColor: "var(--cbt-accent)" }
+                            : undefined
+                        }
                       >
-                        {selected && <Check className="w-3 h-3" />}
-                        {selected ? "Dipilih" : item.badge}
+                        {selected && <Check className="w-3 h-3" aria-hidden="true" />}
+                        {selected ? "Aktif" : item.badge}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500 leading-relaxed">
+                    <p className="text-xs text-slate-600 leading-relaxed">
                       {item.description}
                     </p>
                   </div>

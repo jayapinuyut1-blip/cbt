@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   GraduationCap,
   LayoutDashboard,
@@ -30,25 +30,52 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
 }
 
-const ADMIN_NAV: NavItem[] = [
-  { href: "/admin", label: "Beranda", icon: LayoutDashboard },
-  { href: "/admin/monitoring", label: "Monitoring Ujian", icon: Activity },
-  { href: "/admin/jadwal", label: "Jadwal & Token", icon: CalendarClock },
-  { href: "/admin/pengguna", label: "Siswa & Guru", icon: Users },
-  { href: "/admin/master", label: "Kelas, Mapel & TA", icon: BookOpen },
-  { href: "/admin/nilai", label: "Rekap Nilai & Backup", icon: FileSpreadsheet },
-  { href: "/admin/pengaturan", label: "Identitas & Tema", icon: Settings },
+interface NavGroup {
+  label?: string;
+  items: NavItem[];
+}
+
+const ADMIN_NAV_GROUPS: NavGroup[] = [
+  {
+    label: "Pelaksanaan",
+    items: [
+      { href: "/admin", label: "Beranda", icon: LayoutDashboard },
+      { href: "/admin/monitoring", label: "Monitoring Ujian", icon: Activity },
+      { href: "/admin/jadwal", label: "Jadwal & Token", icon: CalendarClock },
+    ],
+  },
+  {
+    label: "Data Sekolah",
+    items: [
+      { href: "/admin/pengguna", label: "Siswa & Guru", icon: Users },
+      { href: "/admin/master", label: "Kelas, Mapel & TA", icon: BookOpen },
+    ],
+  },
+  {
+    label: "Arsip & Sistem",
+    items: [
+      { href: "/admin/nilai", label: "Rekap Nilai & Backup", icon: FileSpreadsheet },
+      { href: "/admin/pengaturan", label: "Identitas & Tema", icon: Settings },
+    ],
+  },
 ];
 
-const GURU_NAV: NavItem[] = [
-  { href: "/guru", label: "Beranda", icon: LayoutDashboard },
-  { href: "/guru/bank-soal", label: "Bank Soal", icon: FileText },
-  { href: "/guru/ujian", label: "Kelola Ujian", icon: ClipboardList },
-  { href: "/guru/koreksi", label: "Koreksi, Nilai & Analisis", icon: PenTool },
+const GURU_NAV_GROUPS: NavGroup[] = [
+  {
+    label: "Ruang Guru",
+    items: [
+      { href: "/guru", label: "Beranda", icon: LayoutDashboard },
+      { href: "/guru/bank-soal", label: "Bank Soal", icon: FileText },
+      { href: "/guru/ujian", label: "Kelola Ujian", icon: ClipboardList },
+      { href: "/guru/koreksi", label: "Koreksi, Nilai & Analisis", icon: PenTool },
+    ],
+  },
 ];
 
-const SISWA_NAV: NavItem[] = [
-  { href: "/siswa", label: "Daftar Ujian", icon: ClipboardList },
+const SISWA_NAV_GROUPS: NavGroup[] = [
+  {
+    items: [{ href: "/siswa", label: "Daftar Ujian", icon: ClipboardList }],
+  },
 ];
 
 export default function AppShell({
@@ -64,13 +91,14 @@ export default function AppShell({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const menuBtnRef = useRef<HTMLButtonElement | null>(null);
 
-  const navItems =
+  const navGroups =
     profile.role === "admin"
-      ? ADMIN_NAV
+      ? ADMIN_NAV_GROUPS
       : profile.role === "guru"
-      ? GURU_NAV
-      : SISWA_NAV;
+      ? GURU_NAV_GROUPS
+      : SISWA_NAV_GROUPS;
 
   const userInitial = (profile.nama || profile.username || "U")
     .trim()
@@ -91,13 +119,21 @@ export default function AppShell({
     setPendingHref(null);
   }, [pathname]);
 
+  function closeDrawerAndRestoreFocus() {
+    setOpen(false);
+    requestAnimationFrame(() => menuBtnRef.current?.focus());
+  }
+
   // Tutup drawer dengan tombol Escape & kunci scroll body saat drawer terbuka
   useEffect(() => {
     if (!open) return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        requestAnimationFrame(() => menuBtnRef.current?.focus());
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => {
@@ -120,39 +156,55 @@ export default function AppShell({
 
   function renderNavList(onSelect?: () => void) {
     return (
-      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const active = isActiveRoute(item.href);
-          const loading = pendingHref === item.href && !active;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => {
-                if (!active) setPendingHref(item.href);
-                onSelect?.();
-              }}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition ${
-                active
-                  ? "cbt-nav-item-active font-semibold"
-                  : loading
-                  ? "cbt-nav-item-active font-medium opacity-85"
-                  : "cbt-nav-item font-medium"
-              }`}
-            >
-              <Icon
-                className={`w-4 h-4 shrink-0 ${
-                  active || loading ? "cbt-nav-icon-active" : "cbt-nav-icon"
-                }`}
-              />
-              <span className="truncate flex-1">{item.label}</span>
-              {loading && (
-                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 opacity-80" />
-              )}
-            </Link>
-          );
-        })}
+      <nav
+        aria-label="Navigasi utama"
+        className="flex-1 p-3 space-y-4 overflow-y-auto"
+      >
+        {navGroups.map((group, gIdx) => (
+          <div key={group.label || gIdx} className="space-y-1">
+            {group.label && (
+              <div className="px-3 pb-1 text-[11px] font-semibold cbt-profile-sub">
+                {group.label}
+              </div>
+            )}
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              const active = isActiveRoute(item.href);
+              const loading = pendingHref === item.href && !active;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  onClick={() => {
+                    if (!active) setPendingHref(item.href);
+                    onSelect?.();
+                  }}
+                  className={`flex items-center gap-3 min-h-[44px] px-3 py-2 rounded-lg text-sm transition ${
+                    active
+                      ? "cbt-nav-item-active font-semibold"
+                      : loading
+                      ? "cbt-nav-item-active font-medium opacity-85"
+                      : "cbt-nav-item font-medium"
+                  }`}
+                >
+                  <Icon
+                    className={`w-4 h-4 shrink-0 ${
+                      active || loading ? "cbt-nav-icon-active" : "cbt-nav-icon"
+                    }`}
+                  />
+                  <span className="truncate flex-1">{item.label}</span>
+                  {loading && (
+                    <Loader2
+                      className="w-3.5 h-3.5 animate-spin shrink-0 opacity-80"
+                      aria-hidden="true"
+                    />
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
     );
   }
@@ -161,7 +213,10 @@ export default function AppShell({
     return (
       <div className="p-3 border-t cbt-sidebar-footer space-y-1.5">
         <div className="px-2.5 py-2 rounded-xl border cbt-profile-card flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg cbt-avatar text-white font-bold text-xs flex items-center justify-center shrink-0">
+          <div
+            aria-hidden="true"
+            className="w-8 h-8 rounded-lg cbt-avatar text-white font-bold text-xs flex items-center justify-center shrink-0"
+          >
             {userInitial}
           </div>
           <div className="min-w-0 text-xs">
@@ -177,16 +232,17 @@ export default function AppShell({
         <Link
           href="/ganti-sandi"
           onClick={onSelect}
-          className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium cbt-nav-item transition"
+          className="flex items-center gap-2.5 min-h-[44px] px-3 py-2 rounded-lg text-sm font-medium cbt-nav-item transition"
         >
-          <KeyRound className="w-4 h-4 cbt-nav-icon" />
+          <KeyRound className="w-4 h-4 cbt-nav-icon" aria-hidden="true" />
           <span>Ganti Kata Sandi</span>
         </Link>
         <button
+          type="button"
           onClick={handleLogout}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium cbt-logout-btn transition cursor-pointer"
+          className="w-full flex items-center gap-2.5 min-h-[44px] px-3 py-2 rounded-lg text-sm font-medium cbt-logout-btn transition"
         >
-          <LogOut className="w-4 h-4" />
+          <LogOut className="w-4 h-4" aria-hidden="true" />
           <span>Keluar</span>
         </button>
       </div>
@@ -196,26 +252,28 @@ export default function AppShell({
   return (
     <div className="min-h-[100dvh] flex cbt-canvas">
       {/* Sidebar Desktop (mengikuti tema aktif secara penuh) */}
-      <aside className="hidden md:flex md:w-64 md:flex-col md:sticky md:top-0 md:h-[100dvh] cbt-sidebar border-r shadow-xs no-print shrink-0">
+      <aside className="hidden md:flex md:w-64 md:flex-col md:sticky md:top-0 md:h-[100dvh] cbt-sidebar border-r no-print shrink-0">
         <div className="px-4 py-3.5 cbt-header text-white flex items-center gap-3">
           {settings.logo ? (
-            <div className="w-9 h-9 rounded-lg bg-white/95 p-1 flex items-center justify-center shrink-0 shadow-xs">
+            <div className="w-9 h-9 rounded-lg bg-white/95 p-1 flex items-center justify-center shrink-0">
               <img
                 src={settings.logo}
-                alt="Logo"
+                alt={`Logo ${settings.nama_sekolah}`}
+                width={32}
+                height={32}
                 className="w-full h-full object-contain"
               />
             </div>
           ) : (
             <div className="w-9 h-9 rounded-lg bg-white/15 border border-white/25 text-white flex items-center justify-center shrink-0">
-              <GraduationCap className="w-5 h-5" />
+              <GraduationCap className="w-5 h-5" aria-hidden="true" />
             </div>
           )}
           <div className="min-w-0">
             <div className="font-bold text-sm leading-tight truncate">
               {settings.nama_sekolah}
             </div>
-            <div className="text-[11px] text-white/80 uppercase tracking-wider font-medium mt-0.5">
+            <div className="text-[11px] text-white/85 capitalize font-medium mt-0.5">
               Panel {profile.role}
             </div>
           </div>
@@ -227,83 +285,97 @@ export default function AppShell({
 
       {/* Main Column */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Topbar Mobile (Sticky, tema warna & identitas identik dengan Desktop Sidebar) */}
-        <header className="md:hidden sticky top-0 z-30 cbt-header text-white shadow-sm px-3.5 py-2.5 flex items-center justify-between gap-3 no-print">
+        {/* Topbar Mobile (Sticky, identitas identik dengan Desktop Sidebar) */}
+        <header className="md:hidden sticky top-0 z-30 cbt-header text-white shadow-xs px-3.5 py-2.5 flex items-center justify-between gap-3 no-print">
           <div className="flex items-center gap-2.5 min-w-0">
             {settings.logo ? (
-              <div className="w-8 h-8 rounded-lg bg-white/95 p-1 flex items-center justify-center shrink-0 shadow-xs">
+              <div className="w-8 h-8 rounded-lg bg-white/95 p-1 flex items-center justify-center shrink-0">
                 <img
                   src={settings.logo}
-                  alt="Logo"
+                  alt={`Logo ${settings.nama_sekolah}`}
+                  width={28}
+                  height={28}
                   className="w-full h-full object-contain"
                 />
               </div>
             ) : (
               <div className="w-8 h-8 rounded-lg bg-white/15 border border-white/25 text-white flex items-center justify-center shrink-0">
-                <GraduationCap className="w-4 h-4" />
+                <GraduationCap className="w-4 h-4" aria-hidden="true" />
               </div>
             )}
             <div className="min-w-0">
               <div className="font-bold text-sm leading-tight truncate">
                 {settings.nama_sekolah}
               </div>
-              <div className="text-[10px] text-white/80 uppercase tracking-wider font-medium truncate">
+              <div className="text-[11px] text-white/85 capitalize font-medium truncate">
                 Panel {profile.role} • {profile.nama}
               </div>
             </div>
           </div>
 
           <button
+            ref={menuBtnRef}
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="p-2 rounded-lg bg-white/10 hover:bg-white/20 active:bg-white/25 text-white transition cursor-pointer shrink-0"
+            className="w-11 h-11 rounded-lg bg-white/10 hover:bg-white/20 active:bg-white/25 text-white transition flex items-center justify-center shrink-0"
             aria-label={open ? "Tutup menu" : "Buka menu"}
             aria-expanded={open}
           >
-            {open ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {open ? (
+              <X className="w-5 h-5" aria-hidden="true" />
+            ) : (
+              <Menu className="w-5 h-5" aria-hidden="true" />
+            )}
           </button>
         </header>
 
-        {/* Mobile Slide-Over Drawer (identik dengan Desktop Sidebar) */}
+        {/* Mobile Slide-Over Drawer */}
         {open && (
-          <div className="md:hidden fixed inset-0 z-50 flex no-print">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menu navigasi"
+            className="md:hidden fixed inset-0 z-50 flex no-print"
+          >
             <div
-              className="fixed inset-0 bg-slate-900/50 backdrop-blur-[1px]"
-              onClick={() => setOpen(false)}
+              className="fixed inset-0 bg-slate-900/50"
+              onClick={closeDrawerAndRestoreFocus}
               aria-hidden="true"
             />
-            <aside className="relative z-10 w-72 max-w-[85vw] h-[100dvh] cbt-sidebar shadow-2xl flex flex-col">
+            <aside className="relative z-10 w-72 max-w-[85vw] h-[100dvh] cbt-sidebar shadow-xl flex flex-col">
               <div className="px-4 py-3.5 cbt-header text-white flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
                   {settings.logo ? (
                     <div className="w-8 h-8 rounded-lg bg-white/95 p-1 flex items-center justify-center shrink-0">
                       <img
                         src={settings.logo}
-                        alt="Logo"
+                        alt={`Logo ${settings.nama_sekolah}`}
+                        width={28}
+                        height={28}
                         className="w-full h-full object-contain"
                       />
                     </div>
                   ) : (
                     <div className="w-8 h-8 rounded-lg bg-white/15 border border-white/25 flex items-center justify-center shrink-0">
-                      <GraduationCap className="w-4 h-4" />
+                      <GraduationCap className="w-4 h-4" aria-hidden="true" />
                     </div>
                   )}
                   <div className="min-w-0">
                     <div className="font-bold text-sm leading-tight truncate">
                       {settings.nama_sekolah}
                     </div>
-                    <div className="text-[11px] text-white/80 uppercase tracking-wider">
+                    <div className="text-[11px] text-white/85 capitalize">
                       Panel {profile.role}
                     </div>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setOpen(false)}
-                  className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+                  onClick={closeDrawerAndRestoreFocus}
+                  className="w-10 h-10 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center"
                   aria-label="Tutup menu"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
 

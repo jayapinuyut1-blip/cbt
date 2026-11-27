@@ -37,10 +37,10 @@ export const APP_THEMES: AppThemeMeta[] = [
   },
   {
     id: "dark-saas",
-    name: "Pro SaaS Dark-Chrome",
-    badge: "Tren Dashboard",
+    name: "Kontras Gelap-Terang",
+    badge: "Fokus Tinggi",
     description:
-      "Sidebar & topbar gelap premium gaya Linear/Vercel, dipadu area soal putih bersih agar tetap terang saat ujian.",
+      "Sidebar dan topbar gelap berjarak kontras tinggi, dipadu area soal putih bersih agar mata tetap fokus selama ujian.",
     themeColor: "#0f172a",
     preview: {
       headerBg: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
@@ -53,26 +53,26 @@ export const APP_THEMES: AppThemeMeta[] = [
   },
   {
     id: "soft-glass",
-    name: "Soft Glass & Mesh",
-    badge: "Modern Tech",
+    name: "Cobalt Bersih",
+    badge: "Modern Ringan",
     description:
-      "Nuansa biru-indigo segar dengan efek mesh gradient lembut dan kartu kaca halus (frosted glass).",
-    themeColor: "#2563eb",
+      "Nuansa biru kobalt sejuk dengan permukaan kartu bersih dan aksen kaca tipis pada layar masuk.",
+    themeColor: "#1d4ed8",
     preview: {
-      headerBg: "linear-gradient(135deg, #2563eb 0%, #4f46e5 100%)",
-      sidebarBg: "#f8fbff",
-      canvasBg: "#eff6ff",
-      accentColor: "#4f46e5",
-      secondaryAccent: "#06b6d4",
+      headerBg: "linear-gradient(135deg, #1d4ed8 0%, #3730a3 100%)",
+      sidebarBg: "#ffffff",
+      canvasBg: "#f1f5fd",
+      accentColor: "#1d4ed8",
+      secondaryAccent: "#0284c7",
       isDarkSidebar: false,
     },
   },
   {
     id: "warm-paper",
     name: "Warm Paper Eye-Care",
-    badge: "Anti-Lelah Mata",
+    badge: "Nyaman Mata",
     description:
-      "Latar krem hangat minim silau dengan aksen hijau emerald. Sangat nyaman untuk ujian panjang 90–120 menit.",
+      "Latar krem hangat minim silau dengan aksen hijau emerald. Nyaman untuk ujian panjang 90 hingga 120 menit.",
     themeColor: "#065f46",
     preview: {
       headerBg: "linear-gradient(135deg, #065f46 0%, #047857 100%)",
