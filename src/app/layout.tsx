@@ -3,6 +3,7 @@ import { Plus_Jakarta_Sans } from "next/font/google";
 import { getSchoolSettings } from "@/lib/server-auth";
 import { getThemeMeta } from "@/lib/themes";
 import NavigationProgress from "@/components/NavigationProgress";
+import "katex/dist/katex.min.css";
 import "./globals.css";
 
 const plusJakartaSans = Plus_Jakarta_Sans({

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateTime, questionTypeLabel } from "@/lib/format";
+import MathText from "@/components/MathText";
 import { CheckCircle2, Clock, ArrowLeft } from "lucide-react";
 
 interface ResultDetail {
@@ -180,7 +181,7 @@ export default function SiswaHasilPage() {
               </div>
 
               <div className="text-sm text-slate-900 whitespace-pre-wrap break-words">
-                {item.teks}
+                <MathText text={item.teks} />
               </div>
 
               {item.gambar && (
@@ -206,7 +207,7 @@ export default function SiswaHasilPage() {
                             : "bg-slate-50 border-slate-200 text-slate-700"
                         }`}
                       >
-                        {o.teks}
+                        <MathText text={o.teks} />
                         {o.benar && " (Kunci Benar)"}
                         {isPicked && !o.benar && " (Jawaban Anda)"}
                         {isPicked && o.benar && " (Jawaban Anda, Benar)"}
@@ -243,10 +244,16 @@ export default function SiswaHasilPage() {
                             : "bg-rose-50 border-rose-200"
                         }`}
                       >
-                        <strong>{o.teks}</strong> → Jawaban Anda:{" "}
-                        <span className="font-medium">{picked}</span> | Kunci:{" "}
+                        <strong>
+                          <MathText text={o.teks} />
+                        </strong>{" "}
+                        → Jawaban Anda:{" "}
+                        <span className="font-medium">
+                          <MathText text={picked} />
+                        </span>{" "}
+                        | Kunci:{" "}
                         <span className="text-emerald-700 font-semibold">
-                          {o.pasangan}
+                          <MathText text={o.pasangan} />
                         </span>
                       </div>
                     );

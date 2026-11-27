@@ -1,6 +1,7 @@
 "use client";
 
 import { questionTypeLabel } from "@/lib/format";
+import MathText from "@/components/MathText";
 import type { GeneratedQuestion } from "@/app/api/guru/generate-questions/route";
 import { Download, Save, Trash2 } from "lucide-react";
 
@@ -31,7 +32,7 @@ export default function AiQuestionPreview({
     <div className="border-t border-slate-200 pt-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="font-bold text-sm text-slate-900">
-          Pratinjau Hasil ({results.length} Soal — {subjectName} Kelas {grade})
+          Pratinjau Hasil ({results.length} Soal: {subjectName} Kelas {grade})
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -81,8 +82,8 @@ export default function AiQuestionPreview({
               </button>
             </div>
 
-            <div className="text-sm text-slate-900 whitespace-pre-wrap">
-              {q.teks}
+            <div className="text-sm text-slate-900 whitespace-pre-wrap break-words">
+              <MathText text={q.teks} />
             </div>
 
             {q.tipe === "pg" && q.opsi_pg && (
@@ -90,13 +91,13 @@ export default function AiQuestionPreview({
                 {q.opsi_pg.map((o, i) => (
                   <div
                     key={i}
-                    className={`px-2 py-1 rounded border ${
+                    className={`px-2 py-1 rounded border break-words ${
                       o.benar
                         ? "bg-emerald-50 border-emerald-300 text-emerald-900 font-semibold"
                         : "bg-white border-slate-200 text-slate-700"
                     }`}
                   >
-                    {String.fromCharCode(65 + i)}. {o.teks}
+                    {String.fromCharCode(65 + i)}. <MathText text={o.teks} />
                   </div>
                 ))}
               </div>
@@ -113,10 +114,12 @@ export default function AiQuestionPreview({
                 {q.pasangan_jodoh.map((p, i) => (
                   <div
                     key={i}
-                    className="px-2 py-1 rounded bg-white border border-slate-200"
+                    className="px-2 py-1 rounded bg-white border border-slate-200 break-words"
                   >
-                    {p.kiri} →{" "}
-                    <strong className="text-emerald-700">{p.kanan}</strong>
+                    <MathText text={p.kiri} /> →{" "}
+                    <strong className="text-emerald-700">
+                      <MathText text={p.kanan} />
+                    </strong>
                   </div>
                 ))}
               </div>

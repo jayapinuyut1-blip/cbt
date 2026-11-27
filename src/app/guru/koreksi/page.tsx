@@ -12,6 +12,7 @@ import {
   type RemedialRule,
 } from "@/lib/remedial";
 import RemedialModal from "@/components/RemedialModal";
+import MathText from "@/components/MathText";
 import EssayAiGradingPanel from "@/components/guru/EssayAiGradingPanel";
 import type { EssayAiSuggestion } from "@/lib/essay-ai";
 import {
@@ -511,7 +512,9 @@ export default function GuruKoreksiPage() {
                 <div className="font-semibold text-slate-700 mb-1">
                   Pertanyaan (Bobot maks: {row.questions?.bobot}):
                 </div>
-                <div className="whitespace-pre-wrap">{row.questions?.teks}</div>
+                <div className="whitespace-pre-wrap break-words">
+                  <MathText text={row.questions?.teks} />
+                </div>
               </div>
 
               <div className="text-sm text-slate-900 bg-blue-50/40 p-3.5 rounded-lg border border-blue-100">

@@ -11,6 +11,7 @@ import {
   parseExcelQuestionRows,
 } from "@/lib/question-excel";
 import AiQuestionModal from "@/components/AiQuestionModal";
+import MathText from "@/components/MathText";
 import QuestionFormModal from "@/components/guru/QuestionFormModal";
 import type { Question, Subject } from "@/types/cbt";
 import { Plus, Upload, Download, Trash2, Edit3, Sparkles } from "lucide-react";
@@ -274,15 +275,15 @@ export default function GuruBankSoalPage() {
               </div>
             </div>
 
-            <div className="text-sm text-slate-900 whitespace-pre-wrap">
-              {q.teks}
+            <div className="text-sm text-slate-900 whitespace-pre-wrap break-words">
+              <MathText text={q.teks} />
             </div>
 
             {q.gambar && (
               <img
                 src={q.gambar}
                 alt="Gambar soal"
-                className="max-h-48 rounded-lg border border-slate-200"
+                className="max-w-full h-auto max-h-48 rounded-lg border border-slate-200"
               />
             )}
 
@@ -291,13 +292,13 @@ export default function GuruBankSoalPage() {
                 {(q.question_options || []).map((o, i) => (
                   <div
                     key={o.id}
-                    className={`text-xs px-2.5 py-1.5 rounded border ${
+                    className={`text-xs px-2.5 py-1.5 rounded border break-words ${
                       o.benar
                         ? "bg-emerald-50 border-emerald-300 text-emerald-900 font-semibold"
                         : "bg-slate-50 border-slate-200 text-slate-700"
                     }`}
                   >
-                    {String.fromCharCode(65 + i)}. {o.teks}
+                    {String.fromCharCode(65 + i)}. <MathText text={o.teks} />
                   </div>
                 ))}
               </div>
@@ -315,11 +316,14 @@ export default function GuruBankSoalPage() {
                 {(q.question_options || []).map((o) => (
                   <div
                     key={o.id}
-                    className="px-2.5 py-1.5 rounded bg-slate-50 border border-slate-200"
+                    className="px-2.5 py-1.5 rounded bg-slate-50 border border-slate-200 break-words"
                   >
-                    <span className="font-medium">{o.teks}</span> →{" "}
+                    <span className="font-medium">
+                      <MathText text={o.teks} />
+                    </span>{" "}
+                    →{" "}
                     <span className="text-emerald-700 font-semibold">
-                      {o.pasangan}
+                      <MathText text={o.pasangan} />
                     </span>
                   </div>
                 ))}

@@ -1,6 +1,7 @@
 "use client";
 
 import { Strikethrough } from "lucide-react";
+import MathText from "@/components/MathText";
 import type {
   AnswerPayload,
   SanitizedQuestion,
@@ -38,7 +39,7 @@ export default function ExamQuestionCard({
       <div
         className={`${textSizeClass} leading-relaxed whitespace-pre-wrap break-words select-none`}
       >
-        {question.teks}
+        <MathText text={question.teks} />
       </div>
 
       {question.gambar && (
@@ -86,7 +87,7 @@ export default function ExamQuestionCard({
                     {letter}
                   </span>
                   <span className={`${textSizeClass} pt-0.5 break-words select-none`}>
-                    {opt.teks}
+                    <MathText text={opt.teks} />
                   </span>
                 </button>
 
@@ -150,8 +151,8 @@ export default function ExamQuestionCard({
                 key={item.id}
                 className="grid sm:grid-cols-12 gap-2.5 items-center p-3 rounded-xl border border-slate-200 bg-slate-50 hc-option"
               >
-                <div className={`sm:col-span-6 font-medium ${textSizeClass}`}>
-                  {idx + 1}. {item.teks}
+                <div className={`sm:col-span-6 font-medium break-words ${textSizeClass}`}>
+                  {idx + 1}. <MathText text={item.teks} />
                 </div>
                 <div className="sm:col-span-6">
                   <select
