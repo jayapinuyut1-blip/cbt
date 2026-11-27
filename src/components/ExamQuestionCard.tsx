@@ -34,9 +34,9 @@ export default function ExamQuestionCard({
 }: Props) {
   return (
     <>
-      {/* Teks & Gambar Soal (Anti-seleksi teks) */}
+      {/* Teks & Gambar Soal (Anti-seleksi teks, aman dari horizontal overflow) */}
       <div
-        className={`${textSizeClass} leading-relaxed whitespace-pre-wrap select-none`}
+        className={`${textSizeClass} leading-relaxed whitespace-pre-wrap break-words select-none`}
       >
         {question.teks}
       </div>
@@ -46,7 +46,7 @@ export default function ExamQuestionCard({
           <img
             src={question.gambar}
             alt="Gambar soal"
-            className="max-h-80 rounded-xl border border-slate-200 object-contain"
+            className="max-w-full h-auto max-h-80 rounded-xl border border-slate-200 object-contain"
           />
         </div>
       )}
@@ -70,7 +70,7 @@ export default function ExamQuestionCard({
                       false
                     )
                   }
-                  className={`flex-1 text-left px-4 py-3 rounded-xl border-2 flex items-start gap-3 transition cursor-pointer ${
+                  className={`flex-1 min-w-0 min-h-[48px] text-left px-3.5 sm:px-4 py-3 rounded-xl border-2 flex items-start gap-3 transition cursor-pointer ${
                     selected
                       ? "border-blue-600 bg-blue-50 text-blue-950 font-medium hc-option-selected"
                       : "border-slate-200 hover:border-blue-300 bg-white hc-option"
@@ -85,23 +85,28 @@ export default function ExamQuestionCard({
                   >
                     {letter}
                   </span>
-                  <span className={`${textSizeClass} pt-0.5 select-none`}>
+                  <span className={`${textSizeClass} pt-0.5 break-words select-none`}>
                     {opt.teks}
                   </span>
                 </button>
 
-                {/* Tombol Coret Opsi (Bluebook-style) */}
+                {/* Tombol Coret Opsi (minimum tap target 44x44px) */}
                 <button
                   type="button"
                   onClick={() => onToggleEliminate(question.id, opt.id)}
                   title={isElim ? "Batal Coret Opsi" : "Coret Opsi Salah"}
-                  className={`px-3 rounded-xl border text-xs flex items-center justify-center cursor-pointer ${
+                  aria-label={
+                    isElim
+                      ? `Batal coret opsi ${letter}`
+                      : `Coret opsi ${letter}`
+                  }
+                  className={`min-w-[44px] min-h-[44px] px-3 rounded-xl border text-xs flex items-center justify-center shrink-0 cursor-pointer ${
                     isElim
                       ? "bg-slate-800 text-white border-slate-800"
-                      : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
+                      : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
                   }`}
                 >
-                  <Strikethrough className="w-4 h-4" />
+                  <Strikethrough className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
             );

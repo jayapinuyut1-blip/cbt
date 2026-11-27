@@ -95,10 +95,10 @@ export default function ExamQuestionNav({
       <button
         type="button"
         onClick={onSubmitClick}
-        className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer"
+        className="w-full min-h-[44px] py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer"
       >
-        <CheckCircle2 className="w-4 h-4" />
-        Selesai & Kumpulkan
+        <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+        Selesai &amp; Kumpulkan
       </button>
     </>
   );

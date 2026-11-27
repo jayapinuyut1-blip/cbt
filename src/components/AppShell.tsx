@@ -317,14 +317,20 @@ export default function AppShell({
             ref={menuBtnRef}
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="w-11 h-11 rounded-lg bg-white/10 hover:bg-white/20 active:bg-white/25 text-white transition flex items-center justify-center shrink-0"
-            aria-label={open ? "Tutup menu" : "Buka menu"}
+            className="min-h-[44px] px-3 rounded-lg bg-white/15 hover:bg-white/25 active:bg-white/30 text-white transition inline-flex items-center gap-1.5 text-xs font-semibold shrink-0"
+            aria-label={open ? "Tutup menu navigasi" : "Buka menu navigasi"}
             aria-expanded={open}
           >
             {open ? (
-              <X className="w-5 h-5" aria-hidden="true" />
+              <>
+                <X className="w-4 h-4" aria-hidden="true" />
+                <span>Tutup</span>
+              </>
             ) : (
-              <Menu className="w-5 h-5" aria-hidden="true" />
+              <>
+                <Menu className="w-4 h-4" aria-hidden="true" />
+                <span>Menu</span>
+              </>
             )}
           </button>
         </header>

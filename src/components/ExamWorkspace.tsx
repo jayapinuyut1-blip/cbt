@@ -365,7 +365,7 @@ export default function ExamWorkspace({
       {mode === "preview" && (
         <div className="bg-indigo-700 text-white px-3.5 sm:px-4 py-2 text-xs sm:text-sm flex items-center justify-between gap-2">
           <span className="truncate">
-            <strong>PRATINJAU GURU</strong> — Tampilan identik dengan layar siswa.
+            <strong>PRATINJAU GURU:</strong> Tampilan identik dengan layar siswa.
           </span>
           <button
             onClick={onExitPreview}
@@ -490,13 +490,14 @@ export default function ExamWorkspace({
             </div>
 
             <div className="flex items-center gap-1.5">
-              {/* Kontrol Aksesibilitas: Ukuran Teks & Kontras Tinggi */}
+              {/* Kontrol Aksesibilitas: Ukuran Teks & Kontras Tinggi (min tap target 44px) */}
               <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden hc-option">
                 <button
                   type="button"
                   onClick={() => setTextScale((s) => Math.max(0, s - 1))}
                   title="Perkecil Teks"
-                  className="px-2 py-1.5 text-xs font-bold hover:bg-slate-100 cursor-pointer"
+                  aria-label="Perkecil ukuran teks"
+                  className="min-w-[40px] min-h-[40px] sm:min-h-[36px] px-2.5 py-1.5 text-xs font-bold hover:bg-slate-100 cursor-pointer"
                 >
                   A-
                 </button>
@@ -504,9 +505,10 @@ export default function ExamWorkspace({
                   type="button"
                   onClick={() => setTextScale((s) => Math.min(3, s + 1))}
                   title="Perbesar Teks"
-                  className="px-2 py-1.5 text-xs font-bold hover:bg-slate-100 border-l border-slate-200 cursor-pointer"
+                  aria-label="Perbesar ukuran teks"
+                  className="min-w-[40px] min-h-[40px] sm:min-h-[36px] px-2.5 py-1.5 text-xs font-bold hover:bg-slate-100 border-l border-slate-200 cursor-pointer"
                 >
-                  <Type className="w-3.5 h-3.5 inline mr-0.5" />+
+                  <Type className="w-3.5 h-3.5 inline mr-0.5" aria-hidden="true" />+
                 </button>
               </div>
 
@@ -514,13 +516,15 @@ export default function ExamWorkspace({
                 type="button"
                 onClick={() => setHighContrast(!highContrast)}
                 title="Mode Kontras Tinggi"
-                className={`p-1.5 sm:p-2 rounded-lg border cursor-pointer ${
+                aria-label={highContrast ? "Matikan mode kontras tinggi" : "Aktifkan mode kontras tinggi"}
+                aria-pressed={highContrast}
+                className={`min-w-[40px] min-h-[40px] sm:min-h-[36px] p-2 rounded-lg border cursor-pointer flex items-center justify-center ${
                   highContrast
                     ? "bg-yellow-400 text-black border-yellow-400"
                     : "border-slate-200 hover:bg-slate-100"
                 }`}
               >
-                <Contrast className="w-4 h-4" />
+                <Contrast className="w-4 h-4" aria-hidden="true" />
               </button>
 
               {mode === "live" && !isFullscreen && (
@@ -528,9 +532,10 @@ export default function ExamWorkspace({
                   type="button"
                   onClick={requestFullscreen}
                   title="Masuk Layar Penuh"
+                  aria-label="Masuk layar penuh"
                   className="hidden sm:inline-flex p-2 rounded-lg border border-slate-200 hover:bg-slate-100 cursor-pointer"
                 >
-                  <Maximize className="w-4 h-4" />
+                  <Maximize className="w-4 h-4" aria-hidden="true" />
                 </button>
               )}
 
@@ -538,9 +543,10 @@ export default function ExamWorkspace({
               <button
                 type="button"
                 onClick={() => setShowMobileNav(true)}
-                className="lg:hidden inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold cursor-pointer"
+                aria-label="Buka daftar nomor soal"
+                className="lg:hidden inline-flex items-center gap-1 min-h-[40px] px-3 py-1.5 rounded-lg cbt-btn-primary text-xs font-semibold cursor-pointer"
               >
-                <LayoutGrid className="w-3.5 h-3.5" />
+                <LayoutGrid className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>
                   {answeredCount}/{session.questions.length}
                 </span>
@@ -557,16 +563,16 @@ export default function ExamWorkspace({
         </div>
       )}
 
-      {/* Konten Utama: 1 Soal per Layar + Panel Nomor Soal */}
-      <div className="flex-1 max-w-6xl w-full mx-auto p-3.5 sm:p-4 pb-24 lg:pb-6 grid lg:grid-cols-12 gap-5 items-start">
+      {/* Konten Utama: 1 Soal per Layar + Panel Nomor Soal (ruang bawah aman dari bottom bar) */}
+      <div className="flex-1 max-w-6xl w-full mx-auto p-3.5 sm:p-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] lg:pb-6 grid lg:grid-cols-12 gap-5 items-start">
         {/* Area Soal */}
-        <section className="lg:col-span-8 bg-white rounded-2xl border border-slate-200 p-5 sm:p-7 space-y-5 hc-card">
-          <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-200">
+        <section className="lg:col-span-8 min-w-0 bg-white rounded-2xl border border-slate-200 p-4 sm:p-7 space-y-5 hc-card">
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200">
             <div className="flex items-center gap-2">
               <span className="px-2.5 py-1 rounded-lg bg-blue-600 text-white font-bold text-sm">
                 Soal No. {currentIdx + 1}
               </span>
-              <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+              <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700">
                 {questionTypeLabel(question.tipe)}
               </span>
             </div>
@@ -581,13 +587,13 @@ export default function ExamWorkspace({
                   false
                 )
               }
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition ${
+              className={`inline-flex items-center gap-1.5 min-h-[44px] sm:min-h-[36px] px-3.5 py-2 sm:py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition ${
                 currentAns.ragu
                   ? "bg-amber-400 text-slate-900 border-amber-500"
-                  : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-amber-50"
+                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-amber-50"
               }`}
             >
-              <Flag className="w-3.5 h-3.5" />
+              <Flag className="w-3.5 h-3.5" aria-hidden="true" />
               {currentAns.ragu ? "Ditandai Ragu-ragu" : "Tandai Ragu-ragu"}
             </button>
           </div>
@@ -661,25 +667,25 @@ export default function ExamWorkspace({
         </aside>
       </div>
 
-      {/* Bilah Navigasi Bawah Tetap Khusus Mobile/Tablet (Tema Identik Desktop) */}
-      <div className="lg:hidden fixed bottom-0 inset-x-0 z-20 bg-white/95 backdrop-blur border-t border-slate-200 px-3.5 pt-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(15,23,42,0.06)] hc-card">
-        <div className="max-w-3xl mx-auto flex items-center justify-between gap-2">
+      {/* Bilah Navigasi Bawah Tetap Khusus Mobile/Tablet (Target Sentuh >= 44px) */}
+      <div className="lg:hidden fixed bottom-0 inset-x-0 z-20 bg-white border-t border-slate-200 px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(15,23,42,0.06)] hc-card">
+        <div className="max-w-3xl mx-auto flex items-center justify-between gap-2.5">
           <button
             type="button"
             disabled={currentIdx === 0 || isSequential}
             onClick={() => setCurrentIdx((i) => Math.max(0, i - 1))}
-            className="inline-flex items-center gap-1 px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-800 text-xs sm:text-sm font-semibold cursor-pointer"
+            className="inline-flex items-center gap-1 min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-800 text-xs sm:text-sm font-semibold cursor-pointer"
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-4 h-4" aria-hidden="true" />
             <span>Prev</span>
           </button>
 
           <button
             type="button"
             onClick={() => setShowMobileNav(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-xs sm:text-sm font-semibold cursor-pointer hc-option"
+            className="inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-xs sm:text-sm font-semibold cursor-pointer hc-option"
           >
-            <LayoutGrid className="w-4 h-4 text-blue-600" />
+            <LayoutGrid className="w-4 h-4 text-blue-600" aria-hidden="true" />
             <span>
               No. {currentIdx + 1}/{session.questions.length}
             </span>
@@ -693,18 +699,18 @@ export default function ExamWorkspace({
                   Math.min(session.questions.length - 1, i + 1)
                 )
               }
-              className="inline-flex items-center gap-1 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold cursor-pointer"
+              className="inline-flex items-center gap-1 min-h-[44px] px-4 py-2.5 rounded-xl cbt-btn-primary text-xs sm:text-sm font-semibold cursor-pointer"
             >
               <span>Next</span>
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-4 h-4" aria-hidden="true" />
             </button>
           ) : (
             <button
               type="button"
               onClick={() => setShowConfirmModal(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold cursor-pointer"
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold cursor-pointer"
             >
-              <Send className="w-4 h-4" />
+              <Send className="w-4 h-4" aria-hidden="true" />
               <span>Kumpulkan</span>
             </button>
           )}
@@ -730,10 +736,10 @@ export default function ExamWorkspace({
               <button
                 type="button"
                 onClick={() => setShowMobileNav(false)}
-                className="p-2 rounded-lg hover:bg-slate-100 cursor-pointer"
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-slate-100 cursor-pointer"
                 aria-label="Tutup daftar nomor"
               >
-                <X className="w-5 h-5" />
+                <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
             <ExamQuestionNav

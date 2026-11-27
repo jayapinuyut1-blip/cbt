@@ -91,33 +91,33 @@ export default function SiswaHasilPage() {
     result.nilai >= result.exam.kkm;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-5 sm:space-y-6">
       <Link
         href="/siswa"
-        className="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900"
+        className="inline-flex items-center gap-1.5 min-h-[44px] px-3 -ml-3 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 transition"
       >
-        <ArrowLeft className="w-4 h-4" /> Kembali ke Daftar Ujian
+        <ArrowLeft className="w-4 h-4" aria-hidden="true" /> Kembali ke Daftar Ujian
       </Link>
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 text-center space-y-4">
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-8 text-center space-y-4">
         <div className="w-14 h-14 mx-auto rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
           {result.status === "menunggu_koreksi" ? (
-            <Clock className="w-7 h-7 text-amber-600" />
+            <Clock className="w-7 h-7 text-amber-600" aria-hidden="true" />
           ) : (
-            <CheckCircle2 className="w-7 h-7" />
+            <CheckCircle2 className="w-7 h-7" aria-hidden="true" />
           )}
         </div>
 
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 break-words">
             {result.is_remedial
               ? `Ujian Remedial #${Math.max(1, (result.attempt_ke || 2) - 1)} Dikumpulkan`
               : "Ujian Telah Dikumpulkan"}
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            {result.exam.judul} — {result.exam.mapel}
+          <p className="text-sm text-slate-600 mt-1 break-words">
+            {result.exam.judul} ({result.exam.mapel})
           </p>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-slate-600 mt-0.5">
             Selesai pada {formatDateTime(result.selesai)}
           </p>
         </div>
@@ -179,7 +179,7 @@ export default function SiswaHasilPage() {
                 </span>
               </div>
 
-              <div className="text-sm text-slate-900 whitespace-pre-wrap">
+              <div className="text-sm text-slate-900 whitespace-pre-wrap break-words">
                 {item.teks}
               </div>
 
@@ -187,7 +187,7 @@ export default function SiswaHasilPage() {
                 <img
                   src={item.gambar}
                   alt="Gambar soal"
-                  className="max-h-48 rounded-lg border border-slate-200"
+                  className="max-w-full h-auto max-h-48 rounded-lg border border-slate-200"
                 />
               )}
 
@@ -198,18 +198,18 @@ export default function SiswaHasilPage() {
                     return (
                       <div
                         key={o.id}
-                        className={`px-3 py-2 rounded-lg border ${
+                        className={`px-3 py-2 rounded-lg border break-words ${
                           o.benar
                             ? "bg-emerald-50 border-emerald-300 text-emerald-900 font-semibold"
                             : isPicked
                             ? "bg-rose-50 border-rose-300 text-rose-900"
-                            : "bg-slate-50 border-slate-200 text-slate-600"
+                            : "bg-slate-50 border-slate-200 text-slate-700"
                         }`}
                       >
                         {o.teks}
-                        {o.benar && " ✓ (Kunci Benar)"}
-                        {isPicked && !o.benar && " ✗ (Jawaban Anda)"}
-                        {isPicked && o.benar && " — Jawaban Anda"}
+                        {o.benar && " (Kunci Benar)"}
+                        {isPicked && !o.benar && " (Jawaban Anda)"}
+                        {isPicked && o.benar && " (Jawaban Anda, Benar)"}
                       </div>
                     );
                   })}

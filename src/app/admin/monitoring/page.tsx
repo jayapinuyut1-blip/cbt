@@ -241,8 +241,9 @@ export default function AdminMonitoringPage() {
             Pantau peserta langsung, reset login (ganti perangkat tanpa kehilangan jawaban), tambah waktu, atau reset ulang dari nol.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           <button
+            type="button"
             onClick={() =>
               doAction(
                 {
@@ -254,32 +255,34 @@ export default function AdminMonitoringPage() {
               )
             }
             disabled={students.length === 0}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white rounded-lg text-sm font-medium cursor-pointer"
+            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 py-2 cbt-btn-primary disabled:opacity-50 rounded-lg text-xs sm:text-sm font-semibold cursor-pointer"
           >
-            <Users className="w-4 h-4" />
-            Reset Login Massal ({students.length})
+            <Users className="w-4 h-4" aria-hidden="true" />
+            <span>Reset Login Massal ({students.length})</span>
           </button>
           <button
+            type="button"
             onClick={loadMonitoring}
-            className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-sm font-medium cursor-pointer"
+            className="inline-flex items-center justify-center gap-2 min-h-[44px] px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 rounded-lg text-xs sm:text-sm font-medium cursor-pointer"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            Muat Ulang
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
+            <span>Muat Ulang</span>
           </button>
         </div>
       </div>
 
-      {/* Filter */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center gap-3">
+      {/* Filter (Reflow 1 kolom di HP, baris di Tablet/Desktop) */}
+      <div className="bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2.5 sm:gap-3">
         <select
           value={selectedExamId}
           onChange={(e) => setSelectedExamId(e.target.value)}
-          className="flex-1 min-w-56 px-3 py-2 rounded-lg border border-slate-300 text-sm"
+          aria-label="Pilih paket ujian"
+          className="w-full sm:w-auto sm:flex-1 sm:min-w-56 min-w-0 min-h-[44px] px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
         >
           <option value="">-- Pilih Ujian --</option>
           {exams.map((ex) => (
             <option key={ex.id} value={ex.id}>
-              {ex.judul} ({ex.subjects?.nama}) — Token: {ex.token}
+              {ex.judul} ({ex.subjects?.nama}) | Token: {ex.token}
             </option>
           ))}
         </select>
@@ -287,7 +290,8 @@ export default function AdminMonitoringPage() {
         <select
           value={selectedKelasId}
           onChange={(e) => setSelectedKelasId(e.target.value)}
-          className="px-3 py-2 rounded-lg border border-slate-300 text-sm"
+          aria-label="Filter kelas"
+          className="w-full sm:w-auto min-h-[44px] px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white"
         >
           <option value="">Semua Kelas</option>
           {classes.map((c) => (
@@ -298,9 +302,9 @@ export default function AdminMonitoringPage() {
         </select>
 
         {selectedExam && (
-          <div className="px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200 text-sm">
-            Token:{" "}
-            <span className="font-mono font-bold text-blue-800 tracking-widest">
+          <div className="px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-sm flex items-center justify-between sm:justify-start gap-2">
+            <span className="text-slate-700">Token:</span>
+            <span className="font-mono font-bold text-blue-900 tracking-widest">
               {selectedExam.token}
             </span>
           </div>
@@ -349,8 +353,255 @@ export default function AdminMonitoringPage() {
         </span>
       </div>
 
-      {/* Tabel Peserta */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+      {/* Tampilan Kartu Khusus Mobile & Tablet Sempit (Zero Horizontal Scroll) */}
+      <div className="lg:hidden space-y-3">
+        {students.map((st) => {
+          const att = latestAttemptByStudent.get(st.id);
+          const totalQ = Array.isArray(att?.question_order)
+            ? att.question_order.length
+            : 0;
+          const answered = att ? answerCounts[att.id] || 0 : 0;
+          const attLogs = att
+            ? logs.filter((l) => l.attempt_id === att.id)
+            : [];
+          const warnCount = attLogs.filter(
+            (l) =>
+              l.jenis === "pindah_tab" ||
+              l.jenis === "keluar_layar_penuh" ||
+              l.jenis === "split_screen"
+          ).length;
+          const isLocked = Boolean(
+            att?.is_locked && att.status === "mengerjakan"
+          );
+
+          return (
+            <div
+              key={st.id}
+              className={`rounded-xl border p-4 space-y-3 ${
+                isLocked
+                  ? "bg-rose-50/80 border-rose-300"
+                  : st.is_blocked
+                  ? "bg-red-50/50 border-red-200"
+                  : "bg-white border-slate-200"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-semibold text-sm text-slate-900 break-words">
+                    {st.nama}
+                  </div>
+                  <div className="text-xs text-slate-600 mt-0.5 break-words">
+                    {st.username} • {st.classes?.nama || "-"}
+                    {st.is_blocked && (
+                      <span className="ml-1.5 text-red-700 font-semibold">
+                        [DIBLOKIR]
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="shrink-0 flex flex-col items-end gap-1">
+                  {!att ? (
+                    <span className="px-2 py-0.5 text-xs rounded-md bg-slate-100 text-slate-700 font-medium">
+                      Belum Mulai
+                    </span>
+                  ) : att.status === "mengerjakan" ? (
+                    isLocked ? (
+                      <span className="px-2 py-0.5 text-xs rounded-md bg-rose-600 text-white font-bold">
+                        TERKUNCI ({att.pelanggaran_count || warnCount}x)
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 text-xs rounded-md bg-amber-100 text-amber-900 font-medium">
+                        Mengerjakan
+                        {att.extra_minutes > 0 ? ` (+${att.extra_minutes}m)` : ""}
+                      </span>
+                    )
+                  ) : att.status === "menunggu_koreksi" ? (
+                    <span className="px-2 py-0.5 text-xs rounded-md bg-indigo-100 text-indigo-900 font-medium">
+                      Menunggu Koreksi
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 text-xs rounded-md bg-emerald-100 text-emerald-900 font-medium">
+                      Selesai ({att.nilai ?? "-"})
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 bg-slate-50/90 px-3 py-2 rounded-lg border border-slate-200/70">
+                <span>
+                  Terjawab:{" "}
+                  <strong className="font-mono text-slate-900">
+                    {att ? `${answered}/${totalQ}` : "-"}
+                  </strong>
+                </span>
+                {warnCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedLogs({ nama: st.nama, items: attLogs })
+                    }
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-100 text-rose-800 font-semibold"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" />
+                    Log {warnCount}x
+                  </button>
+                ) : (
+                  <span>Log: Normal</span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                {isLocked && att && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      doAction(
+                        { action: "unlock_attempt", attempt_id: att.id },
+                        `Buka kunci layar ujian untuk ${st.nama}? (Hitungan pelanggaran akan direset ke 0 agar siswa dapat melanjutkan)`,
+                        `Kunci layar ${st.nama} berhasil dibuka.`
+                      )
+                    }
+                    className="col-span-2 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold"
+                  >
+                    <Unlock className="w-4 h-4" aria-hidden="true" />
+                    Buka Kunci Layar
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    doAction(
+                      {
+                        action: "reset_login",
+                        student_id: st.id,
+                        attempt_id: att?.id,
+                      },
+                      undefined,
+                      `Sesi login ${st.nama} berhasil direset.`
+                    )
+                  }
+                  className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 py-2 rounded-lg bg-blue-50 text-blue-800 hover:bg-blue-100 border border-blue-200 text-xs font-semibold"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                  Reset Login
+                </button>
+
+                {att && att.status === "mengerjakan" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const m = prompt("Tambah waktu berapa menit?", "10");
+                        if (m && Number(m) > 0) {
+                          doAction({
+                            action: "add_time",
+                            attempt_id: att.id,
+                            minutes: Number(m),
+                          });
+                        }
+                      }}
+                      className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 py-2 rounded-lg bg-amber-50 text-amber-900 hover:bg-amber-100 border border-amber-200 text-xs font-semibold"
+                    >
+                      <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                      +Waktu
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        doAction(
+                          { action: "force_finish", attempt_id: att.id },
+                          `Paksa selesai ujian untuk ${st.nama}?`
+                        )
+                      }
+                      className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 py-2 rounded-lg bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 text-xs font-semibold"
+                    >
+                      <CheckSquare className="w-3.5 h-3.5" aria-hidden="true" />
+                      Paksa Selesai
+                    </button>
+                  </>
+                )}
+
+                {att && att.status !== "mengerjakan" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const m = prompt(
+                        `Buka kembali ujian untuk ${st.nama}? Tambah waktu berapa menit?`,
+                        "30"
+                      );
+                      if (m && Number(m) > 0) {
+                        doAction({
+                          action: "reopen_attempt",
+                          attempt_id: att.id,
+                          minutes: Number(m),
+                        });
+                      }
+                    }}
+                    className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 py-2 rounded-lg bg-indigo-50 text-indigo-800 hover:bg-indigo-100 border border-indigo-200 text-xs font-semibold"
+                  >
+                    <Unlock className="w-3.5 h-3.5" aria-hidden="true" />
+                    Buka Lagi
+                  </button>
+                )}
+
+                {att && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      doAction(
+                        {
+                          action: "reset_attempt_total",
+                          attempt_id: att.id,
+                          student_id: st.id,
+                        },
+                        `PERINGATAN: Hapus percobaan & seluruh jawaban ${st.nama} pada percobaan ini agar siswa mengulang dari NOL?`,
+                        `Percobaan ${st.nama} berhasil direset ulang dari nol.`
+                      )
+                    }
+                    className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 py-2 rounded-lg bg-rose-50 text-rose-800 hover:bg-rose-100 border border-rose-200 text-xs font-semibold"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                    Reset Ulang
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    doAction({
+                      action: "toggle_block",
+                      student_id: st.id,
+                      is_blocked: !st.is_blocked,
+                    })
+                  }
+                  className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold"
+                >
+                  {st.is_blocked ? (
+                    <>
+                      <CheckCircle className="w-3.5 h-3.5 text-emerald-700" aria-hidden="true" />
+                      Buka Blokir
+                    </>
+                  ) : (
+                    <>
+                      <Ban className="w-3.5 h-3.5 text-rose-700" aria-hidden="true" />
+                      Blokir
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        {students.length === 0 && (
+          <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-600 text-sm">
+            Tidak ada peserta untuk filter ini.
+          </div>
+        )}
+      </div>
+
+      {/* Tabel Peserta (Khusus Desktop) */}
+      <div className="hidden lg:block bg-white rounded-xl border border-slate-200 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
@@ -593,7 +844,7 @@ export default function AdminMonitoringPage() {
             })}
             {students.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={6} className="px-4 py-8 text-center text-slate-600">
                   Tidak ada peserta untuk filter ini.
                 </td>
               </tr>
@@ -608,7 +859,7 @@ export default function AdminMonitoringPage() {
           <div className="bg-white rounded-xl max-w-md w-full p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-slate-900">
-                Log Aktivitas — {selectedLogs.nama}
+                Log Aktivitas: {selectedLogs.nama}
               </h3>
               <button
                 onClick={() => setSelectedLogs(null)}
