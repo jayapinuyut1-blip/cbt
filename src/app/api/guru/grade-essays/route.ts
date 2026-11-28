@@ -12,39 +12,12 @@ import {
   normalizeAiGradingResponse,
   type EssayAiItemInput,
 } from "@/lib/essay-ai";
+import {
+  callGeminiJsonArray,
+  getConfiguredGeminiApiKeys,
+} from "@/lib/gemini-client";
 
 export const maxDuration = 60;
-
-// Antrian FIFO concurrency server-side agar tidak memicu 429 Gemini
-const MAX_CONCURRENT_AI = 2;
-let activeJobs = 0;
-const waitQueue: Array<() => void> = [];
-
-function acquireSlot(): Promise<void> {
-  if (activeJobs < MAX_CONCURRENT_AI) {
-    activeJobs++;
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    waitQueue.push(() => {
-      activeJobs++;
-      resolve();
-    });
-  });
-}
-
-function releaseSlot() {
-  activeJobs = Math.max(0, activeJobs - 1);
-  const next = waitQueue.shift();
-  if (next) next();
-}
-
-const GEMINI_MODELS = [
-  "gemini-3.5-flash-lite",
-  "gemini-3.1-flash-lite",
-  "gemini-flash-latest",
-  "gemini-3.8-flash",
-];
 
 const RESPONSE_SCHEMA = {
   type: "ARRAY",
@@ -58,39 +31,6 @@ const RESPONSE_SCHEMA = {
     required: ["answerId", "score", "reason"],
   },
 };
-
-function tryParseArray(rawText: string): unknown[] | null {
-  const cleaned = rawText
-    .trim()
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-
-  const candidates = [cleaned];
-  const first = cleaned.indexOf("[");
-  const last = cleaned.lastIndexOf("]");
-  if (first !== -1 && last > first) {
-    candidates.push(cleaned.slice(first, last + 1));
-  }
-
-  for (const text of candidates) {
-    try {
-      const parsed = JSON.parse(text);
-      if (Array.isArray(parsed)) return parsed;
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        Array.isArray((parsed as { results?: unknown[] }).results)
-      ) {
-        return (parsed as { results: unknown[] }).results;
-      }
-    } catch {
-      // Coba kandidat berikutnya
-    }
-  }
-  return null;
-}
 
 export async function POST(request: Request) {
   const { profile } = await getCurrentUserProfile();
@@ -191,8 +131,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const apiKey = process.env.GEMINI_API_KEY || "";
-    if (!apiKey) {
+    if (getConfiguredGeminiApiKeys().length === 0) {
       return NextResponse.json(
         {
           error:
@@ -219,7 +158,8 @@ export async function POST(request: Request) {
       pertanyaan: it.questionText,
       bobot_maks: it.maxScore,
       rubrik_guru:
-        it.rubric || "(Tidak ada rubrik khusus; nilai berdasarkan ketepatan dan kelengkapan terhadap pertanyaan)",
+        it.rubric ||
+        "(Tidak ada rubrik khusus; nilai berdasarkan ketepatan dan kelengkapan terhadap pertanyaan)",
       jawaban_siswa: it.studentAnswer,
     }));
 
@@ -239,73 +179,24 @@ Pedoman penilaian:
 Data jawaban anonim:
 ${JSON.stringify(anonymizedPayload, null, 2)}`;
 
-    await acquireSlot();
+    const aiRes = await callGeminiJsonArray({
+      prompt,
+      responseSchema: RESPONSE_SCHEMA,
+      temperature: 0.2,
+      maxOutputTokens: 4096,
+      wrapperArrayKeys: ["results"],
+    });
 
-    let lastError = "Gagal menghubungi Gemini API.";
-    let parsedArray: unknown[] | null = null;
-
-    try {
-      for (const model of GEMINI_MODELS) {
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
-          apiKey
-        )}`;
-        const resp = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.2,
-              maxOutputTokens: 4096,
-              responseMimeType: "application/json",
-              responseSchema: RESPONSE_SCHEMA,
-            },
-          }),
-        });
-
-        if (!resp.ok) {
-          const errText = await resp.text();
-          lastError = `Gemini (${model}) error ${resp.status}: ${errText.slice(0, 160)}`;
-          if (resp.status === 429 || resp.status === 503) {
-            await new Promise((r) => setTimeout(r, 700));
-          }
-          continue;
-        }
-
-        const data = await resp.json();
-        const parts: Array<{ thought?: boolean; text?: string }> =
-          data?.candidates?.[0]?.content?.parts || [];
-
-        const rawText = parts
-          .filter((p) => !p.thought && typeof p.text === "string")
-          .map((p) => p.text)
-          .join("")
-          .trim();
-
-        if (!rawText) {
-          lastError = `Gemini (${model}) mengembalikan respon kosong.`;
-          continue;
-        }
-
-        const arr = tryParseArray(rawText);
-        if (arr && arr.length > 0) {
-          parsedArray = arr;
-          break;
-        }
-        lastError = `Format JSON dari ${model} tidak lengkap.`;
-      }
-    } finally {
-      releaseSlot();
-    }
-
-    if (!parsedArray) {
+    if (!aiRes.ok) {
       return NextResponse.json(
-        { error: `${lastError} Silakan ulangi atau gunakan Mode Prompt Gratis.` },
-        { status: 502 }
+        {
+          error: `${aiRes.error} Silakan ulangi atau gunakan Mode Prompt Gratis.`,
+        },
+        { status: aiRes.status }
       );
     }
 
-    const results = normalizeAiGradingResponse(parsedArray, maxScoreByAnswerId);
+    const results = normalizeAiGradingResponse(aiRes.items, maxScoreByAnswerId);
     if (results.length === 0) {
       return NextResponse.json(
         { error: "AI tidak mengembalikan skor yang cocok dengan jawaban." },
@@ -313,7 +204,11 @@ ${JSON.stringify(anonymizedPayload, null, 2)}`;
       );
     }
 
-    return NextResponse.json({ ok: true, results });
+    return NextResponse.json({
+      ok: true,
+      results,
+      meta: { model: aiRes.model, keySlot: aiRes.keyLabel },
+    });
   } catch (err) {
     console.error("AI grade essays error:", err);
     return NextResponse.json(

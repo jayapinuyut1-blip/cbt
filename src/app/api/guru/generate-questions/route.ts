@@ -8,6 +8,10 @@ import {
   AI_MAX_BATCHES_PER_WINDOW,
   consumeAiRateLimit,
 } from "@/lib/rate-limit";
+import {
+  callGeminiJsonArray,
+  getConfiguredGeminiApiKeys,
+} from "@/lib/gemini-client";
 
 export const maxDuration = 60;
 
@@ -19,37 +23,6 @@ export interface GeneratedQuestion {
   kunci_isian?: string[];
   pasangan_jodoh?: Array<{ kiri: string; kanan: string }>;
 }
-
-// Antrian FIFO server-side: maksimal 2 request AI aktif bersamaan agar tidak kena rate-limit 429
-const MAX_CONCURRENT_AI = 2;
-let activeAiJobs = 0;
-const waitQueue: Array<() => void> = [];
-
-function acquireAiSlot(): Promise<void> {
-  if (activeAiJobs < MAX_CONCURRENT_AI) {
-    activeAiJobs++;
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    waitQueue.push(() => {
-      activeAiJobs++;
-      resolve();
-    });
-  });
-}
-
-function releaseAiSlot() {
-  activeAiJobs = Math.max(0, activeAiJobs - 1);
-  const next = waitQueue.shift();
-  if (next) next();
-}
-
-const GEMINI_MODELS = [
-  "gemini-3.5-flash-lite",
-  "gemini-3.1-flash-lite",
-  "gemini-flash-latest",
-  "gemini-3.8-flash",
-];
 
 const RESPONSE_SCHEMA = {
   type: "ARRAY",
@@ -93,39 +66,6 @@ const RESPONSE_SCHEMA = {
   },
 };
 
-function tryParseJsonArray(rawText: string): unknown[] | null {
-  const cleaned = rawText
-    .trim()
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-
-  const candidates = [cleaned];
-  const firstBracket = cleaned.indexOf("[");
-  const lastBracket = cleaned.lastIndexOf("]");
-  if (firstBracket !== -1 && lastBracket > firstBracket) {
-    candidates.push(cleaned.slice(firstBracket, lastBracket + 1));
-  }
-
-  for (const text of candidates) {
-    try {
-      const parsed = JSON.parse(text);
-      if (Array.isArray(parsed)) return parsed;
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        Array.isArray((parsed as { questions?: unknown[] }).questions)
-      ) {
-        return (parsed as { questions: unknown[] }).questions;
-      }
-    } catch {
-      // Coba kandidat berikutnya
-    }
-  }
-  return null;
-}
-
 export async function POST(request: Request) {
   const { profile } = await getCurrentUserProfile();
   if (!profile || (profile.role !== "guru" && profile.role !== "admin")) {
@@ -143,7 +83,9 @@ export async function POST(request: Request) {
     const selectedCps: Array<{ elemen: string; deskripsi: string }> =
       Array.isArray(body.selectedCps) ? body.selectedCps : [];
     const avoidQuestions: string[] = Array.isArray(body.avoidQuestions)
-      ? body.avoidQuestions.map((s: unknown) => String(s).slice(0, 120)).slice(-30)
+      ? body.avoidQuestions
+          .map((s: unknown) => String(s).slice(0, 120))
+          .slice(-30)
       : [];
     const gradeLevel = String(body.gradeLevel || "Kelas X SMK (Fase E)").trim();
     const difficulty = String(body.difficulty || "Sedang").trim();
@@ -199,8 +141,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const apiKey = process.env.GEMINI_API_KEY || "";
-    if (!apiKey) {
+    if (getConfiguredGeminiApiKeys().length === 0) {
       return NextResponse.json(
         {
           error:
@@ -255,78 +196,23 @@ Jumlah soal yang WAJIB dibuat pada batch ini:
 
 Kembalikan HANYA JSON array sesuai skema.`;
 
-    // Masuk ke antrian FIFO server-side
-    await acquireAiSlot();
+    const aiRes = await callGeminiJsonArray({
+      prompt,
+      responseSchema: RESPONSE_SCHEMA,
+      temperature: 0.75,
+      maxOutputTokens: 12288,
+      wrapperArrayKeys: ["questions"],
+    });
 
-    let lastError = "Gagal menghubungi Gemini API.";
-    let parsedArray: unknown[] | null = null;
-
-    try {
-      for (const model of GEMINI_MODELS) {
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
-          apiKey
-        )}`;
-        const resp = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.75,
-              maxOutputTokens: 12288,
-              responseMimeType: "application/json",
-              responseSchema: RESPONSE_SCHEMA,
-            },
-          }),
-        });
-
-        if (!resp.ok) {
-          const errText = await resp.text();
-          lastError = `Gemini (${model}) error ${resp.status}: ${errText.slice(0, 160)}`;
-          if (resp.status === 429 || resp.status === 503) {
-            // Jedai sejenak sebelum mencoba model fallback berikutnya
-            await new Promise((r) => setTimeout(r, 700));
-          }
-          continue;
-        }
-
-        const data = await resp.json();
-        const parts: Array<{ thought?: boolean; text?: string }> =
-          data?.candidates?.[0]?.content?.parts || [];
-
-        const rawText = parts
-          .filter((p) => !p.thought && typeof p.text === "string")
-          .map((p) => p.text)
-          .join("")
-          .trim();
-
-        if (!rawText) {
-          lastError = `Gemini (${model}) mengembalikan respon kosong.`;
-          continue;
-        }
-
-        const arr = tryParseJsonArray(rawText);
-        if (arr && arr.length > 0) {
-          parsedArray = arr;
-          break;
-        }
-        lastError = `Format JSON dari ${model} tidak lengkap (finishReason: ${
-          data?.candidates?.[0]?.finishReason || "unknown"
-        }).`;
-      }
-    } finally {
-      releaseAiSlot();
-    }
-
-    if (!parsedArray) {
+    if (!aiRes.ok) {
       return NextResponse.json(
-        { error: `${lastError} Silakan ulangi batch ini.` },
-        { status: 502 }
+        { error: `${aiRes.error} Silakan ulangi batch ini.` },
+        { status: aiRes.status }
       );
     }
 
     const valid: GeneratedQuestion[] = [];
-    for (const item of parsedArray) {
+    for (const item of aiRes.items) {
       if (!item || typeof item !== "object") continue;
       const obj = item as Record<string, unknown>;
       const tipe = String(obj.tipe || "").toLowerCase();
@@ -382,7 +268,11 @@ Kembalikan HANYA JSON array sesuai skema.`;
       );
     }
 
-    return NextResponse.json({ ok: true, questions: valid });
+    return NextResponse.json({
+      ok: true,
+      questions: valid,
+      meta: { model: aiRes.model, keySlot: aiRes.keyLabel },
+    });
   } catch (err) {
     console.error("AI generate error:", err);
     return NextResponse.json(
